@@ -16,6 +16,7 @@ import {
 import { DocumentType, NotebookDocument } from '../types';
 import { chunkDocument } from '../lib/ragEngine';
 import { generateUUID } from '../lib/uuid';
+import { apiFetch } from '../lib/apiHelper';
 
 interface AddSourceModalProps {
   isOpen: boolean;
@@ -62,7 +63,7 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
       let embeddedChunks = [...chunks];
       try {
         const chunkTexts = chunks.map(c => c.content);
-        const resp = await fetch('/api/embeddings', {
+        const embData = await apiFetch('/api/embeddings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -72,14 +73,11 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
           })
         });
 
-        if (resp.ok) {
-          const embData = await resp.json();
-          if (embData.embeddings && embData.embeddings.length === chunks.length) {
-            embeddedChunks = chunks.map((c, idx) => ({
-              ...c,
-              embedding: embData.embeddings[idx]
-            }));
-          }
+        if (embData.embeddings && embData.embeddings.length === chunks.length) {
+          embeddedChunks = chunks.map((c, idx) => ({
+            ...c,
+            embedding: embData.embeddings[idx]
+          }));
         }
       } catch (embErr) {
         console.warn('Embedding fallback to deterministic vector:', embErr);
@@ -123,18 +121,12 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
         reader.onload = async () => {
           try {
             const base64Data = reader.result as string;
-            const resp = await fetch('/api/parse-pdf', {
+            const data = await apiFetch('/api/parse-pdf', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ base64Data, filename: file.name })
             });
 
-            if (!resp.ok) {
-              const err = await resp.json().catch(() => ({}));
-              throw new Error(err.error || 'Falha ao extrair texto do PDF.');
-            }
-
-            const data = await resp.json();
             await finalizeDocument(file.name, data.text, 'pdf');
           } catch (pdfErr: any) {
             setError(pdfErr.message || 'Erro ao ler arquivo PDF.');
@@ -174,18 +166,12 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
     setIsProcessing(true);
 
     try {
-      const resp = await fetch('/api/fetch-url', {
+      const data = await apiFetch('/api/fetch-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: webUrl.trim() })
       });
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || 'Falha ao raspar URL.');
-      }
-
-      const data = await resp.json();
       await finalizeDocument(data.title || webUrl, data.text, 'web_link');
     } catch (err: any) {
       setError(err.message || 'Erro ao buscar link da web.');

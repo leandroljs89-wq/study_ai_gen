@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { NotebookDocument, AIProvider } from '../types';
+import { apiFetch } from '../lib/apiHelper';
 
 interface StudioPanelProps {
   isOpen: boolean;
@@ -70,7 +71,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
         throw new Error('Nenhuma fonte com conteúdo de texto disponível no caderno.');
       }
 
-      const resp = await fetch('/api/generate-studio-artifact', {
+      const data = await apiFetch('/api/generate-studio-artifact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -82,12 +83,6 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
         })
       });
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || 'Falha ao gerar artefato do estúdio.');
-      }
-
-      const data = await resp.json();
       setArtifactContents(prev => ({
         ...prev,
         [type]: data.content

@@ -30,6 +30,7 @@ import {
   syncFullNotebook 
 } from './lib/supabaseClient';
 import { generateUUID, ensureUUID } from './lib/uuid';
+import { apiFetch } from './lib/apiHelper';
 import { User } from '@supabase/supabase-js';
 import { Header } from './components/Header';
 import { SourcesPanel } from './components/SourcesPanel';
@@ -297,7 +298,7 @@ export default function App() {
     if (provider === 'groq') keyToUse = currentKeys.groq_api_key || '';
 
     try {
-      const resp = await fetch('/api/models', {
+      const data = await apiFetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -307,15 +308,12 @@ export default function App() {
         })
       });
 
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.models && data.models.length > 0) {
-          setAvailableModels(data.models);
-          // Set recommended or first model
-          const recommended = data.models.find((m: ModelOption) => m.recommended) || data.models[0];
-          setSelectedModel(recommended.id);
-          return;
-        }
+      if (data.models && data.models.length > 0) {
+        setAvailableModels(data.models);
+        // Set recommended or first model
+        const recommended = data.models.find((m: ModelOption) => m.recommended) || data.models[0];
+        setSelectedModel(recommended.id);
+        return;
       }
     } catch (err) {
       console.warn('Failed to fetch dynamic models, using defaults:', err);
@@ -549,7 +547,7 @@ export default function App() {
       // 1. STEP 1: Generate Embedding for the query (or hybrid fallback)
       let queryVector: number[] | undefined = undefined;
       try {
-        const embResp = await fetch('/api/embeddings', {
+        const embData = await apiFetch('/api/embeddings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -558,11 +556,8 @@ export default function App() {
             apiKey: activeProvider === 'gemini' ? apiKeys.gemini_api_key : apiKeys.openai_api_key
           })
         });
-        if (embResp.ok) {
-          const embData = await embResp.json();
-          if (embData.embeddings && embData.embeddings[0]) {
-            queryVector = embData.embeddings[0];
-          }
+        if (embData.embeddings && embData.embeddings[0]) {
+          queryVector = embData.embeddings[0];
         }
       } catch (embErr) {
         console.warn('Embeddings error, falling back to keyword hybrid search:', embErr);
@@ -609,7 +604,7 @@ export default function App() {
       if (activeProvider === 'anthropic') activeKey = apiKeys.anthropic_api_key || '';
       if (activeProvider === 'groq') activeKey = apiKeys.groq_api_key || '';
 
-      const resp = await fetch('/api/chat', {
+      const data = await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -622,13 +617,6 @@ export default function App() {
           notebookTitle: activeNotebook.title
         })
       });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `Erro na requisição da IA (HTTP ${resp.status})`);
-      }
-
-      const data = await resp.json();
 
       const assistantMsg: ChatMessage = {
         id: generateUUID(),

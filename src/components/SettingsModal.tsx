@@ -24,6 +24,7 @@ import {
 import { UserApiKeys, SupabaseConfig, Notebook, AIProvider } from '../types';
 import { testSupabaseConnection } from '../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
+import { apiFetch } from '../lib/apiHelper';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -290,7 +291,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (provider === 'groq') keyToSend = keysForm.groq_api_key || '';
 
     try {
-      const resp = await fetch('/api/test-key', {
+      const data = await apiFetch('/api/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -299,8 +300,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           ollamaHost: keysForm.ollama_host
         })
       });
-
-      const data = await resp.json();
 
       if (data.success) {
         setStatusByProvider(prev => ({
@@ -330,7 +329,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         [provider]: {
           testing: false,
           connected: false,
-          message: err.message || 'Erro de rede ao validar chave.'
+          message: err.message || 'Erro ao validar chave.'
         }
       }));
     }
