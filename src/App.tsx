@@ -204,17 +204,30 @@ export default function App() {
       setIsSyncingWithSupabase(true);
       await ensureUserProfile(user);
 
-      // 1. Load saved API keys from profile if available
+      // 1. Load and sync saved API keys with profile
       const savedKeys = await loadProfileApiKeys(user.id);
-      if (savedKeys && (savedKeys.openai_api_key || savedKeys.anthropic_api_key || savedKeys.gemini_api_key || savedKeys.groq_api_key)) {
-        setApiKeys(prev => ({
-          ...prev,
-          openai_api_key: savedKeys.openai_api_key || prev.openai_api_key,
-          anthropic_api_key: savedKeys.anthropic_api_key || prev.anthropic_api_key,
-          gemini_api_key: savedKeys.gemini_api_key || prev.gemini_api_key,
-          groq_api_key: savedKeys.groq_api_key || prev.groq_api_key,
-          ollama_host: savedKeys.ollama_host || prev.ollama_host
-        }));
+      if (savedKeys && (savedKeys.openai_api_key || savedKeys.anthropic_api_key || savedKeys.gemini_api_key || savedKeys.groq_api_key || savedKeys.ollama_host)) {
+        setApiKeys(prev => {
+          const merged: UserApiKeys = {
+            openai_api_key: savedKeys.openai_api_key || prev.openai_api_key,
+            anthropic_api_key: savedKeys.anthropic_api_key || prev.anthropic_api_key,
+            gemini_api_key: savedKeys.gemini_api_key || prev.gemini_api_key,
+            groq_api_key: savedKeys.groq_api_key || prev.groq_api_key,
+            ollama_host: savedKeys.ollama_host || prev.ollama_host
+          };
+          try {
+            localStorage.setItem('notebooklm_api_keys', JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      } else {
+        // If profile didn't have keys yet, persist current active local keys to profile
+        setApiKeys(currentKeys => {
+          if (currentKeys.openai_api_key || currentKeys.anthropic_api_key || currentKeys.gemini_api_key || currentKeys.groq_api_key) {
+            saveProfileApiKeys(user.id, currentKeys);
+          }
+          return currentKeys;
+        });
       }
 
       // 2. Fetch remote notebooks from Supabase

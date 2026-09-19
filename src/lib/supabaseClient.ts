@@ -117,20 +117,40 @@ export async function saveProfileApiKeys(userId: string, keys: UserApiKeys): Pro
   const client = getSupabase();
   if (!client || !userId) return false;
   try {
-    const { error } = await client
-      .from('profiles')
-      .upsert({
-        id: userId,
-        openai_api_key: keys.openai_api_key?.trim() || null,
-        anthropic_api_key: keys.anthropic_api_key?.trim() || null,
-        gemini_api_key: keys.gemini_api_key?.trim() || null,
-        groq_api_key: keys.groq_api_key?.trim() || null,
-        ollama_host: keys.ollama_host?.trim() || null,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'id' });
+    const payload = {
+      id: userId,
+      openai_api_key: keys.openai_api_key?.trim() || null,
+      anthropic_api_key: keys.anthropic_api_key?.trim() || null,
+      gemini_api_key: keys.gemini_api_key?.trim() || null,
+      groq_api_key: keys.groq_api_key?.trim() || null,
+      ollama_host: keys.ollama_host?.trim() || null,
+      updated_at: new Date().toISOString()
+    };
 
-    if (error) {
-      console.warn('Erro retornado pelo Supabase ao salvar chaves no profile:', error);
+    // 1. Try upsert first
+    const { error: upsertError } = await client
+      .from('profiles')
+      .upsert(payload, { onConflict: 'id' });
+
+    if (!upsertError) {
+      return true;
+    }
+
+    // 2. Fallback to direct update if upsert failed due to unique constraint or RLS
+    const { error: updateError } = await client
+      .from('profiles')
+      .update({
+        openai_api_key: payload.openai_api_key,
+        anthropic_api_key: payload.anthropic_api_key,
+        gemini_api_key: payload.gemini_api_key,
+        groq_api_key: payload.groq_api_key,
+        ollama_host: payload.ollama_host,
+        updated_at: payload.updated_at
+      })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.warn('Erro ao atualizar chaves no profile Supabase:', updateError);
       return false;
     }
     return true;

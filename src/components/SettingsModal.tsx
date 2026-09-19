@@ -22,7 +22,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { UserApiKeys, SupabaseConfig, Notebook, AIProvider } from '../types';
-import { testSupabaseConnection } from '../lib/supabaseClient';
+import { testSupabaseConnection, saveProfileApiKeys } from '../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/apiHelper';
 
@@ -148,6 +148,9 @@ ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Usuários podem ver seu próprio perfil" 
     ON public.profiles FOR SELECT USING (auth.uid() = id);
 
+CREATE POLICY "Usuários podem inserir seu próprio perfil" 
+    ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
 CREATE POLICY "Usuários podem atualizar seu próprio perfil" 
     ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
@@ -270,11 +273,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [topK, setTopK] = useState(ragParams.topK);
   const [minThreshold, setMinThreshold] = useState(ragParams.minThreshold);
   const [savedRagNotification, setSavedRagNotification] = useState(false);
+  const [isSavingProfileKeys, setIsSavingProfileKeys] = useState(false);
+  const [profileKeysSaveMsg, setProfileKeysSaveMsg] = useState<{ success: boolean; text: string } | null>(null);
 
   if (!isOpen) return null;
 
   const toggleShowKey = (field: string) => {
     setShowKeys(prev => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const handleSaveAllToProfile = async () => {
+    setIsSavingProfileKeys(true);
+    setProfileKeysSaveMsg(null);
+    onSaveApiKeys(keysForm);
+
+    if (currentUser) {
+      const ok = await saveProfileApiKeys(currentUser.id, keysForm);
+      setIsSavingProfileKeys(false);
+      if (ok) {
+        setProfileKeysSaveMsg({ success: true, text: 'Chaves salvas no seu perfil do Supabase com sucesso!' });
+      } else {
+        setProfileKeysSaveMsg({ success: false, text: 'Falha ao salvar chaves no Supabase. Verifique suas tabelas ou permissões RLS.' });
+      }
+    } else {
+      setIsSavingProfileKeys(false);
+      setProfileKeysSaveMsg({ success: true, text: 'Chaves salvas localmente neste navegador.' });
+    }
+    setTimeout(() => setProfileKeysSaveMsg(null), 4000);
   };
 
   // Connect & Test Single Provider Key
@@ -448,6 +473,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 1: API KEYS & DIRECT CONNECT */}
           {activeTab === 'apikeys' && (
             <div className="space-y-4">
+              {/* Supabase Profile Sync Banner */}
+              {currentUser ? (
+                <div className="p-3.5 bg-emerald-50/80 border border-emerald-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                      <Database className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-emerald-950">Sincronização em Nuvem (Supabase Profile)</span>
+                        <span className="text-[10px] bg-emerald-200/70 text-emerald-900 font-semibold px-2 py-0.2 rounded-full">Ativo</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-800 leading-tight mt-0.5">
+                        Conectado como <strong className="font-mono">{currentUser.email}</strong>. As chaves são salvas na sua conta do banco de dados na nuvem.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveAllToProfile}
+                    disabled={isSavingProfileKeys}
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shrink-0 shadow-2xs"
+                  >
+                    {isSavingProfileKeys ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Save className="w-3.5 h-3.5" />
+                    )}
+                    <span>Salvar no Profile Supabase</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="p-3 bg-amber-50/80 border border-amber-200/90 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                    <p className="text-xs text-amber-900">
+                      Você está em modo local. Para persistir suas chaves no seu perfil do Supabase e sincronizar em qualquer dispositivo:
+                    </p>
+                  </div>
+                  {onOpenAuthModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAuthModal();
+                      }}
+                      className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white rounded-lg text-xs font-semibold shrink-0 transition-colors"
+                    >
+                      <span>Entrar / Criar Conta</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {profileKeysSaveMsg && (
+                <div className={`p-2.5 rounded-xl text-xs font-medium flex items-center gap-2 ${
+                  profileKeysSaveMsg.success ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-red-100 text-red-900 border border-red-300'
+                }`}>
+                  {profileKeysSaveMsg.success ? <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />}
+                  <span>{profileKeysSaveMsg.text}</span>
+                </div>
+              )}
+
               <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-xl text-xs text-blue-950 flex items-start gap-2.5">
                 <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                 <p className="leading-relaxed">
@@ -774,19 +863,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Bottom Quick Action */}
-              <div className="pt-2 flex items-center justify-between border-t border-stone-200">
+              <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 border-t border-stone-200">
                 <span className="text-[11px] text-stone-500">
-                  Todas as alterações são salvas localmente e aplicadas instantaneamente.
+                  {currentUser ? 'Chaves salvas automaticamente no seu perfil do Supabase.' : 'Chaves salvas localmente neste navegador.'}
                 </span>
-                <button
-                  onClick={() => {
-                    onSaveApiKeys(keysForm);
-                    onClose();
-                  }}
-                  className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors"
-                >
-                  <Check className="w-3.5 h-3.5 text-emerald-400" /> Concluir & Fechar
-                </button>
+                <div className="flex items-center gap-2 justify-end">
+                  {currentUser && (
+                    <button
+                      type="button"
+                      onClick={handleSaveAllToProfile}
+                      disabled={isSavingProfileKeys}
+                      className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors"
+                    >
+                      {isSavingProfileKeys ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Save className="w-3.5 h-3.5" />
+                      )}
+                      <span>Salvar no Supabase</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      onSaveApiKeys(keysForm);
+                      if (currentUser) {
+                        saveProfileApiKeys(currentUser.id, keysForm);
+                      }
+                      onClose();
+                    }}
+                    className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors"
+                  >
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Concluir & Fechar</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
