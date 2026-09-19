@@ -310,11 +310,100 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }));
 
     let keyToSend = '';
-    if (provider === 'gemini') keyToSend = keysForm.gemini_api_key || '';
-    if (provider === 'openai') keyToSend = keysForm.openai_api_key || '';
-    if (provider === 'anthropic') keyToSend = keysForm.anthropic_api_key || '';
-    if (provider === 'groq') keyToSend = keysForm.groq_api_key || '';
+    if (provider === 'gemini') keyToSend = (keysForm.gemini_api_key || '').trim();
+    if (provider === 'openai') keyToSend = (keysForm.openai_api_key || '').trim();
+    if (provider === 'anthropic') keyToSend = (keysForm.anthropic_api_key || '').trim();
+    if (provider === 'groq') keyToSend = (keysForm.groq_api_key || '').trim();
 
+    if (provider !== 'ollama' && !keyToSend) {
+      setStatusByProvider(prev => ({
+        ...prev,
+        [provider]: {
+          testing: false,
+          connected: false,
+          message: 'Por favor, insira a chave da API antes de testar.'
+        }
+      }));
+      return;
+    }
+
+    // Direct Browser Client Validation for Groq (Instant, 0 Latency)
+    if (provider === 'groq' && keyToSend) {
+      try {
+        const resp = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { Authorization: `Bearer ${keyToSend}` }
+        });
+        if (resp.ok) {
+          const data: any = await resp.json();
+          setStatusByProvider(prev => ({
+            ...prev,
+            groq: {
+              testing: false,
+              connected: true,
+              message: `Groq conectada com sucesso! ${data.data?.length || 0} modelos detectados.`
+            }
+          }));
+          onSaveApiKeys(keysForm);
+          if (currentUser) {
+            saveProfileApiKeys(currentUser.id, keysForm);
+          }
+          return;
+        } else {
+          const err = await resp.json().catch(() => ({}));
+          setStatusByProvider(prev => ({
+            ...prev,
+            groq: {
+              testing: false,
+              connected: false,
+              message: err.error?.message || `Chave Groq inválida (HTTP ${resp.status})`
+            }
+          }));
+          return;
+        }
+      } catch (directErr) {
+        console.warn('Direct Groq validation fallback to server:', directErr);
+      }
+    }
+
+    // Direct Browser Client Validation for OpenAI
+    if (provider === 'openai' && keyToSend) {
+      try {
+        const resp = await fetch('https://api.openai.com/v1/models', {
+          headers: { Authorization: `Bearer ${keyToSend}` }
+        });
+        if (resp.ok) {
+          const data: any = await resp.json();
+          setStatusByProvider(prev => ({
+            ...prev,
+            openai: {
+              testing: false,
+              connected: true,
+              message: `OpenAI conectada com sucesso! ${data.data?.length || 0} modelos detectados.`
+            }
+          }));
+          onSaveApiKeys(keysForm);
+          if (currentUser) {
+            saveProfileApiKeys(currentUser.id, keysForm);
+          }
+          return;
+        } else {
+          const err = await resp.json().catch(() => ({}));
+          setStatusByProvider(prev => ({
+            ...prev,
+            openai: {
+              testing: false,
+              connected: false,
+              message: err.error?.message || `Chave OpenAI inválida (HTTP ${resp.status})`
+            }
+          }));
+          return;
+        }
+      } catch (directErr) {
+        console.warn('Direct OpenAI validation fallback to server:', directErr);
+      }
+    }
+
+    // Server-side fallback validation via /api/test-key
     try {
       const data = await apiFetch('/api/test-key', {
         method: 'POST',
@@ -336,8 +425,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }
         }));
 
-        // Automatically persist in parent & local storage
+        // Automatically persist in parent & local storage & Supabase profile
         onSaveApiKeys(keysForm);
+        if (currentUser) {
+          saveProfileApiKeys(currentUser.id, keysForm);
+        }
       } else {
         setStatusByProvider(prev => ({
           ...prev,

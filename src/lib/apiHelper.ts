@@ -4,10 +4,13 @@ export async function apiFetch(url: string, options?: RequestInit) {
 
   if (!contentType.includes('application/json')) {
     const text = await resp.text().catch(() => '');
-    if (text.includes('The page could not be found') || text.includes('404') || text.includes('<!DOCTYPE html>') || text.toLowerCase().includes('page c')) {
-      throw new Error('A rota da API não foi encontrada ou o Vercel não está direcionando /api para o backend. Certifique-se de que o arquivo vercel.json está configurado corretamente no projeto.');
+    if (text.includes('The page could not be found') || resp.status === 404 || text.includes('PAGE_NOT_FOUND')) {
+      throw new Error('A rota da API não foi encontrada. Verifique se o backend está ativo e o roteamento /api configurado no vercel.json.');
     }
-    throw new Error(`Erro no servidor (${resp.status}): O servidor retornou HTML em vez de JSON.`);
+    if (resp.status === 500) {
+      throw new Error(`Erro interno do servidor (500). Verifique os logs de execução da função serverless.`);
+    }
+    throw new Error(`Erro na resposta da API (${resp.status}): O servidor não retornou JSON.`);
   }
 
   const data = await resp.json();
@@ -16,3 +19,4 @@ export async function apiFetch(url: string, options?: RequestInit) {
   }
   return data;
 }
+

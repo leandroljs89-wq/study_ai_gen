@@ -6,9 +6,6 @@ import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
-
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,8 +24,10 @@ function getGeminiClient(userKey?: string): GoogleGenAI | null {
   return new GoogleGenAI({ apiKey: key });
 }
 
+const router = express.Router();
+
 // Health check
-app.get('/api/health', (req, res) => {
+router.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     hasServerGeminiKey: !!process.env.GEMINI_API_KEY,
@@ -40,7 +39,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Fetch Available Models Dynamically
-app.post('/api/models', async (req, res) => {
+router.post('/models', async (req, res) => {
   const { provider, apiKey, ollamaHost } = req.body;
 
   try {
@@ -163,7 +162,7 @@ app.post('/api/models', async (req, res) => {
 });
 
 // Test and Validate API Key
-app.post('/api/test-key', async (req, res) => {
+router.post('/test-key', async (req, res) => {
   const { provider, apiKey, ollamaHost } = req.body;
 
   try {
@@ -294,8 +293,8 @@ app.post('/api/test-key', async (req, res) => {
   }
 });
 
-// PDF Parsing Endpoint
-app.post('/api/parse-pdf', async (req, res) => {
+// PDF Parsing Endpoint (safe dynamic load)
+router.post('/parse-pdf', async (req, res) => {
   try {
     const { base64Data, filename } = req.body;
     if (!base64Data) {
@@ -305,8 +304,16 @@ app.post('/api/parse-pdf', async (req, res) => {
     const cleanBase64 = base64Data.replace(/^data:application\/pdf;base64,/, '');
     const buffer = Buffer.from(cleanBase64, 'base64');
     
-    // Parse using pdf-parse
-    const data = await pdfParse(buffer);
+    // Parse using dynamically loaded pdf-parse without crash on serverless initialization
+    const require = createRequire(import.meta.url);
+    let pdfParseLib: any;
+    try {
+      pdfParseLib = require('pdf-parse/lib/pdf-parse.js');
+    } catch {
+      pdfParseLib = require('pdf-parse');
+    }
+
+    const data = await pdfParseLib(buffer);
     const text = data.text ? data.text.trim() : '';
 
     if (!text) {
@@ -327,7 +334,7 @@ app.post('/api/parse-pdf', async (req, res) => {
 });
 
 // Web URL Fetching & Scraping
-app.post('/api/fetch-url', async (req, res) => {
+router.post('/fetch-url', async (req, res) => {
   try {
     const { url } = req.body;
     if (!url || !url.startsWith('http')) {
@@ -388,7 +395,7 @@ app.post('/api/fetch-url', async (req, res) => {
 });
 
 // Embeddings endpoint (supporting Gemini or OpenAI or algorithmic high-dimension vectors)
-app.post('/api/embeddings', async (req, res) => {
+router.post('/embeddings', async (req, res) => {
   try {
     const { texts, provider, apiKey } = req.body;
     if (!Array.isArray(texts) || texts.length === 0) {
@@ -501,7 +508,7 @@ function generateDeterministicEmbedding(text: string, dim = 1536): number[] {
 }
 
 // RAG Chat Endpoint with Token Optimization
-app.post('/api/chat', async (req, res) => {
+router.post('/chat', async (req, res) => {
   try {
     const {
       provider = 'gemini',
@@ -748,7 +755,7 @@ ${ragContextSection}`;
 });
 
 // NotebookLM Studio Artifacts Generator (Audio Podcast Overview, Study Guide, FAQ, Briefing)
-app.post('/api/generate-studio-artifact', async (req, res) => {
+router.post('/generate-studio-artifact', async (req, res) => {
   try {
     const { type, documentsText, notebookTitle, provider = 'gemini', apiKey } = req.body;
     
@@ -906,6 +913,10 @@ Estrutura:
     res.status(500).json({ error: error.message || 'Falha ao gerar artefato do estúdio' });
   }
 });
+
+// Mount router on both /api prefix and root for full compatibility with Vercel and local
+app.use('/api', router);
+app.use('/', router);
 
 // Export app for Vercel serverless function
 export default app;
