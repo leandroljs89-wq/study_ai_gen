@@ -257,7 +257,10 @@ export const Header: React.FC<HeaderProps> = ({
             onChange={(e) => onSelectModel(e.target.value)}
             className="appearance-none bg-white font-mono text-xs md:text-sm text-stone-800 pl-3 pr-7 py-1.5 rounded-lg border border-stone-200 shadow-2xs hover:border-stone-300 focus:outline-hidden focus:ring-1 focus:ring-stone-800 cursor-pointer max-w-[140px] md:max-w-[210px] truncate"
           >
-            {availableModels.map((m) => (
+            {(availableModels && availableModels.length > 0 ? availableModels : [
+              { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+              { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile' }
+            ]).map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>

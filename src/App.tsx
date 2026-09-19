@@ -819,6 +819,15 @@ export default function App() {
             notebookTitle={activeNotebook.title}
             documents={activeNotebook.documents}
             activeProvider={activeProvider}
+            apiKey={
+              activeProvider === 'groq'
+                ? apiKeys.groq_api_key
+                : activeProvider === 'openai'
+                ? apiKeys.openai_api_key
+                : activeProvider === 'anthropic'
+                ? apiKeys.anthropic_api_key
+                : apiKeys.gemini_api_key
+            }
             geminiApiKey={apiKeys.gemini_api_key}
             onSaveAsNote={handleSaveAsNote}
           />

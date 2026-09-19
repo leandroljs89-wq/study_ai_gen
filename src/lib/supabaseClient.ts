@@ -119,17 +119,21 @@ export async function saveProfileApiKeys(userId: string, keys: UserApiKeys): Pro
   try {
     const { error } = await client
       .from('profiles')
-      .update({
-        openai_api_key: keys.openai_api_key || null,
-        anthropic_api_key: keys.anthropic_api_key || null,
-        gemini_api_key: keys.gemini_api_key || null,
-        groq_api_key: keys.groq_api_key || null,
-        ollama_host: keys.ollama_host || null,
+      .upsert({
+        id: userId,
+        openai_api_key: keys.openai_api_key?.trim() || null,
+        anthropic_api_key: keys.anthropic_api_key?.trim() || null,
+        gemini_api_key: keys.gemini_api_key?.trim() || null,
+        groq_api_key: keys.groq_api_key?.trim() || null,
+        ollama_host: keys.ollama_host?.trim() || null,
         updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
+      }, { onConflict: 'id' });
 
-    return !error;
+    if (error) {
+      console.warn('Erro retornado pelo Supabase ao salvar chaves no profile:', error);
+      return false;
+    }
+    return true;
   } catch (e) {
     console.warn('Erro ao salvar chaves no profile Supabase:', e);
     return false;

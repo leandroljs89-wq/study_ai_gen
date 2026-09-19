@@ -789,12 +789,108 @@ Estrutura:
       artifactPrompt = `Faça um resumo analítico completo e estruturado dos documentos do caderno "${notebookTitle}".`;
     }
 
-    // Default to Gemini or server key
+    const fullPrompt = `${artifactPrompt}\n\n--- DOCUMENTOS DO CADERNO ---\n${documentsText.slice(0, 30000)}`;
+
+    // 1. Groq
+    if (provider === 'groq') {
+      const groqKey = (apiKey || process.env.GROQ_API_KEY || '').trim();
+      if (!groqKey) {
+        return res.status(401).json({ error: 'Chave da API Groq não informada. Conecte sua chave no painel de configurações.' });
+      }
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${groqKey}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: fullPrompt }],
+          temperature: 0.3
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Erro da Groq: HTTP ${response.status}`);
+      }
+      const data: any = await response.json();
+      return res.json({
+        success: true,
+        type,
+        title: notebookTitle,
+        content: data.choices?.[0]?.message?.content || 'Não foi possível gerar o artefato.'
+      });
+    }
+
+    // 2. OpenAI
+    if (provider === 'openai') {
+      const openAiKey = (apiKey || process.env.OPENAI_API_KEY || '').trim();
+      if (!openAiKey) {
+        return res.status(401).json({ error: 'Chave da API OpenAI não informada.' });
+      }
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${openAiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: fullPrompt }],
+          temperature: 0.3
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Erro da OpenAI: HTTP ${response.status}`);
+      }
+      const data: any = await response.json();
+      return res.json({
+        success: true,
+        type,
+        title: notebookTitle,
+        content: data.choices?.[0]?.message?.content || 'Não foi possível gerar o artefato.'
+      });
+    }
+
+    // 3. Anthropic
+    if (provider === 'anthropic') {
+      const claudeKey = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
+      if (!claudeKey) {
+        return res.status(401).json({ error: 'Chave da API Anthropic não informada.' });
+      }
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': claudeKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-haiku-20241022',
+          messages: [{ role: 'user', content: fullPrompt }],
+          max_tokens: 3000
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Erro da Anthropic: HTTP ${response.status}`);
+      }
+      const data: any = await response.json();
+      return res.json({
+        success: true,
+        type,
+        title: notebookTitle,
+        content: data.content?.[0]?.text || 'Não foi possível gerar o artefato.'
+      });
+    }
+
+    // 4. Default to Gemini or server key
     const gemini = getGeminiClient(apiKey);
     if (gemini) {
       const response = await gemini.models.generateContent({
         model: 'gemini-3.6-flash',
-        contents: `${artifactPrompt}\n\n--- DOCUMENTOS DO CADERNO ---\n${documentsText.slice(0, 30000)}`
+        contents: fullPrompt
       });
       return res.json({
         success: true,
@@ -804,8 +900,7 @@ Estrutura:
       });
     }
 
-    // Fallback if no Gemini key:
-    res.status(400).json({ error: 'Configuração de IA necessária para gerar artefatos de estúdio.' });
+    res.status(400).json({ error: 'Configuração de IA necessária para gerar artefatos de estúdio. Conecte sua chave nas configurações.' });
   } catch (error: any) {
     console.error('Erro em studio artifact:', error);
     res.status(500).json({ error: error.message || 'Falha ao gerar artefato do estúdio' });

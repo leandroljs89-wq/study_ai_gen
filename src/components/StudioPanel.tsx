@@ -26,6 +26,7 @@ interface StudioPanelProps {
   notebookTitle: string;
   documents: NotebookDocument[];
   activeProvider: AIProvider;
+  apiKey?: string;
   geminiApiKey?: string;
   onSaveAsNote: (title: string, content: string) => void;
 }
@@ -38,6 +39,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
   notebookTitle,
   documents,
   activeProvider,
+  apiKey,
   geminiApiKey,
   onSaveAsNote
 }) => {
@@ -71,6 +73,8 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
         throw new Error('Nenhuma fonte com conteúdo de texto disponível no caderno.');
       }
 
+      const keyToUse = apiKey || geminiApiKey;
+
       const data = await apiFetch('/api/generate-studio-artifact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -79,7 +83,7 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
           documentsText: combinedText,
           notebookTitle,
           provider: activeProvider,
-          apiKey: geminiApiKey
+          apiKey: keyToUse
         })
       });
 
