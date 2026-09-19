@@ -1,0 +1,6 @@
+{
+  "name": "NotebookLM - Cadernos IA & RAG",
+  "description": "Plataforma de cadernos inteligentes inspirada no NotebookLM com múltiplos provedores de IA (OpenAI, Anthropic, Gemini, Groq, Ollama), repositório de documentos e arquitetura RAG com busca semântica otimizada.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
