@@ -1,4 +1,4 @@
-export type AIProvider = 'gemini' | 'openai' | 'anthropic' | 'groq' | 'ollama';
+export type AIProvider = 'gemini' | 'openai' | 'anthropic' | 'groq' | 'ollama' | 'openrouter';
 
 export interface ModelOption {
   id: string;
@@ -11,6 +11,7 @@ export interface UserApiKeys {
   openai_api_key?: string;
   anthropic_api_key?: string;
   groq_api_key?: string;
+  openrouter_api_key?: string;
   ollama_host?: string;
 }
 

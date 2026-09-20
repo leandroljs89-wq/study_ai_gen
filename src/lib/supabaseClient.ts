@@ -92,7 +92,7 @@ export async function loadProfileApiKeys(userId: string): Promise<UserApiKeys | 
   try {
     const { data, error } = await client
       .from('profiles')
-      .select('openai_api_key, anthropic_api_key, gemini_api_key, groq_api_key, ollama_host')
+      .select('openai_api_key, anthropic_api_key, gemini_api_key, groq_api_key, openrouter_api_key, ollama_host')
       .eq('id', userId)
       .maybeSingle();
 
@@ -102,6 +102,7 @@ export async function loadProfileApiKeys(userId: string): Promise<UserApiKeys | 
       anthropic_api_key: data.anthropic_api_key || '',
       gemini_api_key: data.gemini_api_key || '',
       groq_api_key: data.groq_api_key || '',
+      openrouter_api_key: data.openrouter_api_key || '',
       ollama_host: data.ollama_host || ''
     };
   } catch (e) {
@@ -123,6 +124,7 @@ export async function saveProfileApiKeys(userId: string, keys: UserApiKeys): Pro
       anthropic_api_key: keys.anthropic_api_key?.trim() || null,
       gemini_api_key: keys.gemini_api_key?.trim() || null,
       groq_api_key: keys.groq_api_key?.trim() || null,
+      openrouter_api_key: keys.openrouter_api_key?.trim() || null,
       ollama_host: keys.ollama_host?.trim() || null,
       updated_at: new Date().toISOString()
     };
@@ -144,6 +146,7 @@ export async function saveProfileApiKeys(userId: string, keys: UserApiKeys): Pro
         anthropic_api_key: payload.anthropic_api_key,
         gemini_api_key: payload.gemini_api_key,
         groq_api_key: payload.groq_api_key,
+        openrouter_api_key: payload.openrouter_api_key,
         ollama_host: payload.ollama_host,
         updated_at: payload.updated_at
       })

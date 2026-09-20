@@ -24,6 +24,31 @@ function getGeminiClient(userKey?: string): GoogleGenAI | null {
   return new GoogleGenAI({ apiKey: key });
 }
 
+function formatGroqModelLabel(id: string): string {
+  if (id === 'llama-3.3-70b-versatile') return 'Llama 3.3 70B Versatile (Recomendado)';
+  if (id === 'llama-3.1-8b-instant') return 'Llama 3.1 8B Instant (Ultra-Rápido)';
+  if (id === 'deepseek-r1-distill-llama-70b') return 'DeepSeek R1 Distill Llama 70B (Raciocínio)';
+  if (id === 'mixtral-8x7b-32768') return 'Mixtral 8x7B (Contexto 32k)';
+  if (id === 'gemma2-9b-it') return 'Gemma 2 9B IT (Google)';
+  if (id === 'qwen-2.5-32b') return 'Qwen 2.5 32B (Alibaba)';
+  return id;
+}
+
+function formatOpenRouterModelLabel(id: string): string {
+  if (id === 'anthropic/claude-3.7-sonnet') return 'Claude 3.7 Sonnet (Anthropic - Recomendado)';
+  if (id === 'anthropic/claude-3.5-sonnet') return 'Claude 3.5 Sonnet (Anthropic)';
+  if (id === 'deepseek/deepseek-r1') return 'DeepSeek R1 (Raciocínio - Recomendado)';
+  if (id === 'deepseek/deepseek-chat') return 'DeepSeek V3 (Chat Rápido)';
+  if (id === 'meta-llama/llama-3.3-70b-instruct') return 'Llama 3.3 70B Instruct (Meta)';
+  if (id === 'google/gemini-2.0-flash-001') return 'Gemini 2.0 Flash (Google - Recomendado)';
+  if (id === 'google/gemini-2.5-flash') return 'Gemini 2.5 Flash (Google)';
+  if (id === 'openai/gpt-4o') return 'GPT-4o (OpenAI)';
+  if (id === 'openai/gpt-4o-mini') return 'GPT-4o Mini (OpenAI)';
+  if (id === 'mistralai/mistral-large-2411') return 'Mistral Large (Mistral AI)';
+  if (id === 'qwen/qwen-2.5-72b-instruct') return 'Qwen 2.5 72B Instruct (Alibaba)';
+  return id;
+}
+
 const router = express.Router();
 
 // Health check
@@ -34,6 +59,7 @@ router.get('/health', (req, res) => {
     hasServerOpenAIKey: !!process.env.OPENAI_API_KEY,
     hasServerAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
     hasServerGroqKey: !!process.env.GROQ_API_KEY,
+    hasServerOpenRouterKey: !!process.env.OPENROUTER_API_KEY,
     time: new Date().toISOString()
   });
 });
@@ -45,11 +71,65 @@ router.post('/models', async (req, res) => {
   try {
     if (provider === 'gemini') {
       const defaultModels = [
-        { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Rápido & Inteligente)', recommended: true },
-        { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Alta Capacidade)', recommended: false },
-        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', recommended: false },
+        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Rápido & Inteligente)', recommended: true },
+        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Raciocínio Avançado)', recommended: false },
+        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', recommended: false },
+        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', recommended: false },
+        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', recommended: false }
       ];
       return res.json({ models: defaultModels });
+    }
+
+    if (provider === 'openrouter') {
+      const key = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+      if (key) {
+        try {
+          const resp = await fetch('https://openrouter.ai/api/v1/models', {
+            headers: {
+              Authorization: `Bearer ${key}`,
+              'HTTP-Referer': 'https://notebooklm.app',
+              'X-Title': 'NotebookLM Pro'
+            }
+          });
+          if (resp.ok) {
+            const data: any = await resp.json();
+            const openRouterModels = (data.data || [])
+              .filter((m: any) => 
+                m.id.includes('claude-3') ||
+                m.id.includes('deepseek') ||
+                m.id.includes('llama-3') ||
+                m.id.includes('gemini-2') ||
+                m.id.includes('gpt-4') ||
+                m.id.includes('mistral') ||
+                m.id.includes('qwen')
+              )
+              .slice(0, 25)
+              .map((m: any) => ({
+                id: m.id,
+                name: m.name ? `${m.name} (${m.id.split('/')[0]})` : formatOpenRouterModelLabel(m.id),
+                recommended: m.id === 'anthropic/claude-3.7-sonnet' || m.id === 'deepseek/deepseek-r1' || m.id === 'meta-llama/llama-3.3-70b-instruct' || m.id === 'google/gemini-2.0-flash-001'
+              }))
+              .sort((a: any, b: any) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+            if (openRouterModels.length > 0) return res.json({ models: openRouterModels });
+          }
+        } catch (e) {
+          console.warn('OpenRouter dynamic fetch fallback', e);
+        }
+      }
+      return res.json({
+        models: [
+          { id: 'anthropic/claude-3.7-sonnet', name: 'Claude 3.7 Sonnet (Anthropic - Recomendado)', recommended: true },
+          { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 (Raciocínio - Recomendado)', recommended: true },
+          { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (Chat Rápido)', recommended: true },
+          { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct (Meta)', recommended: true },
+          { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash (Google)', recommended: true },
+          { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (Google)', recommended: false },
+          { id: 'openai/gpt-4o', name: 'GPT-4o (OpenAI)', recommended: false },
+          { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini (OpenAI)', recommended: false },
+          { id: 'mistralai/mistral-large-2411', name: 'Mistral Large 2411 (Mistral)', recommended: false },
+          { id: 'qwen/qwen-2.5-72b-instruct', name: 'Qwen 2.5 72B Instruct (Alibaba)', recommended: false }
+        ]
+      });
     }
 
     if (provider === 'openai') {
@@ -173,30 +253,91 @@ router.post('/test-key', async (req, res) => {
 
   try {
     if (provider === 'gemini') {
-      const key = apiKey || process.env.GEMINI_API_KEY;
+      const key = (apiKey || process.env.GEMINI_API_KEY || '').trim();
       if (!key) {
         return res.status(400).json({ success: false, message: 'Nenhuma chave fornecida para o Google Gemini.' });
       }
       try {
-        const gemini = new GoogleGenAI({ apiKey: key });
-        let testResp;
-        try {
-          testResp = await gemini.models.generateContent({
-            model: 'gemini-3.6-flash',
-            contents: 'Teste de conexão: responda apenas "OK".'
-          });
-        } catch (firstErr) {
-          // Fallback if 503 temporary spike
-          testResp = await gemini.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: 'Teste de conexão: responda apenas "OK".'
-          });
-        }
-        if (testResp.text) {
+        // Direct test against Google Generative Language API
+        const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+        const resp = await fetch(testUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Responda apenas OK' }] }]
+          })
+        });
+
+        if (resp.ok) {
           return res.json({ success: true, message: 'Google Gemini conectado com sucesso! Chave ativa e operacional.' });
         }
+
+        // Fallback test to gemini-2.0-flash
+        const fbUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
+        const fbResp = await fetch(fbUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Responda apenas OK' }] }]
+          })
+        });
+
+        if (fbResp.ok) {
+          return res.json({ success: true, message: 'Google Gemini conectado com sucesso (Gemini 2.0 Flash).' });
+        }
+
+        const errData = await resp.json().catch(() => ({}));
+        return res.status(resp.status).json({
+          success: false,
+          message: errData.error?.message || `Erro do Google Gemini: HTTP ${resp.status}`
+        });
       } catch (err: any) {
         return res.status(401).json({ success: false, message: `Erro ao validar chave Gemini: ${err.message || 'Chave inválida'}` });
+      }
+    }
+
+    if (provider === 'openrouter') {
+      const key = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+      if (!key) {
+        return res.status(400).json({ success: false, message: 'Insira a chave da OpenRouter (sk-or-v1-...)' });
+      }
+      try {
+        const resp = await fetch('https://openrouter.ai/api/v1/auth/key', {
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'HTTP-Referer': 'https://notebooklm.app',
+            'X-Title': 'NotebookLM Pro'
+          }
+        });
+        if (resp.ok) {
+          const keyData: any = await resp.json().catch(() => ({}));
+          const label = keyData.data?.label || '';
+          const limit = keyData.data?.limit !== null && keyData.data?.limit !== undefined ? ` (Limite: $${keyData.data.limit})` : '';
+          return res.json({
+            success: true,
+            message: `OpenRouter conectada com sucesso! ${label}${limit}`
+          });
+        }
+        // Fallback check models endpoint
+        const modelsResp = await fetch('https://openrouter.ai/api/v1/models', {
+          headers: { Authorization: `Bearer ${key}` }
+        });
+        if (modelsResp.ok) {
+          return res.json({
+            success: true,
+            message: 'OpenRouter conectada com sucesso! Modelos disponíveis.'
+          });
+        }
+        const err = await resp.json().catch(() => ({}));
+        return res.status(resp.status).json({
+          success: false,
+          message: err.error?.message || `Erro da OpenRouter: HTTP ${resp.status}`
+        });
+      } catch (err: any) {
+        return res.status(500).json({
+          success: false,
+          message: `Erro ao conectar com a OpenRouter: ${err.message}`
+        });
       }
     }
 
@@ -472,20 +613,6 @@ router.post('/embeddings', async (req, res) => {
   }
 });
 
-function formatGroqModelLabel(id: string): string {
-  if (id === 'llama-3.3-70b-versatile') return 'Llama 3.3 70B Versatile (Recomendado)';
-  if (id === 'llama-3.1-8b-instant') return 'Llama 3.1 8B Instant (Ultra-Rápido)';
-  if (id === 'deepseek-r1-distill-llama-70b') return 'DeepSeek R1 Distill Llama 70B (Raciocínio)';
-  if (id === 'deepseek-r1-distill-qwen-32b') return 'DeepSeek R1 Distill Qwen 32B';
-  if (id === 'llama-3.1-70b-versatile') return 'Llama 3.1 70B Versatile';
-  if (id === 'mixtral-8x7b-32768') return 'Mixtral 8x7B (Contexto 32k)';
-  if (id === 'gemma2-9b-it') return 'Gemma 2 9B IT (Google)';
-  if (id === 'qwen-2.5-32b') return 'Qwen 2.5 32B (Groq)';
-  if (id === 'llama3-70b-8192') return 'Llama 3 70B (8k)';
-  if (id === 'llama3-8b-8192') return 'Llama 3 8B (8k)';
-  return id;
-}
-
 // Deterministic semantic embedding generator (1536 dimensions) for local similarity
 function generateDeterministicEmbedding(text: string, dim = 1536): number[] {
   const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
@@ -577,14 +704,19 @@ ${ragContextSection}`;
 
     // 1. Google Gemini
     if (provider === 'gemini') {
-      const gemini = getGeminiClient(apiKey);
-      if (!gemini) {
+      const key = (apiKey || process.env.GEMINI_API_KEY || '').trim();
+      if (!key) {
         return res.status(401).json({
-          error: 'Chave do Google Gemini não configurada. Insira sua chave no painel de configurações ou certifique-se de que GEMINI_API_KEY está configurada no ambiente.'
+          error: 'Chave do Google Gemini não configurada. Insira sua chave no painel de configurações ou configure GEMINI_API_KEY.'
         });
       }
 
-      // Convert prior conversation history concisely (last 4 messages for token discipline)
+      let geminiModel = model;
+      if (!geminiModel || !geminiModel.startsWith('gemini') || geminiModel.includes('3.6') || geminiModel.includes('3.8')) {
+        geminiModel = 'gemini-2.5-flash';
+      }
+
+      // Convert prior conversation history concisely
       const recentHistory = messages.slice(-5, -1).map((m: any) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }]
@@ -595,28 +727,110 @@ ${ragContextSection}`;
         { role: 'user', parts: [{ text: `${systemPrompt}\n\nPergunta do Usuário: ${latestUserMessage}` }] }
       ];
 
-      const geminiModel = (model === 'gemini-2.5-flash' || model === 'gemini-2.5-pro' || !model) ? 'gemini-3.6-flash' : model;
-      let response;
       try {
-        response = await gemini.models.generateContent({
-          model: geminiModel,
-          contents
+        const directResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${key}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: contents.map((c: any) => ({
+              role: c.role === 'model' ? 'model' : 'user',
+              parts: c.parts
+            })),
+            generationConfig: {
+              temperature: 0.2
+            }
+          })
         });
-        usedModel = geminiModel;
-      } catch (geminiErr: any) {
-        console.warn(`Gemini primary model failed (${geminiModel}), attempting fallback:`, geminiErr?.message);
-        const fallbackModel = geminiModel === 'gemini-3.6-flash' ? 'gemini-3.8-flash' : 'gemini-3.6-flash';
-        response = await gemini.models.generateContent({
-          model: fallbackModel,
-          contents
-        });
-        usedModel = fallbackModel;
-      }
 
-      reply = response.text || 'Sem resposta do modelo.';
+        if (directResp.ok) {
+          const directData: any = await directResp.json();
+          reply = directData.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta do Gemini.';
+          usedModel = geminiModel;
+        } else {
+          // Try fallback to gemini-2.0-flash
+          const fbResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: contents.map((c: any) => ({
+                role: c.role === 'model' ? 'model' : 'user',
+                parts: c.parts
+              })),
+              generationConfig: { temperature: 0.2 }
+            })
+          });
+
+          if (fbResp.ok) {
+            const fbData: any = await fbResp.json();
+            reply = fbData.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta do Gemini.';
+            usedModel = 'gemini-2.0-flash';
+          } else {
+            const errData = await directResp.json().catch(() => ({}));
+            throw new Error(errData.error?.message || `Google Gemini error: HTTP ${directResp.status}`);
+          }
+        }
+      } catch (geminiErr: any) {
+        console.warn(`Gemini direct REST failed, attempting SDK:`, geminiErr?.message);
+        const geminiClient = getGeminiClient(key);
+        if (geminiClient) {
+          const sdkResp = await geminiClient.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents
+          });
+          reply = sdkResp.text || 'Sem resposta do modelo.';
+          usedModel = 'gemini-2.5-flash';
+        } else {
+          throw geminiErr;
+        }
+      }
     }
 
-    // 2. OpenAI
+    // 2. OpenRouter
+    else if (provider === 'openrouter') {
+      const key = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+      if (!key) {
+        return res.status(401).json({ error: 'Chave da API OpenRouter não configurada. Conecte sua chave no painel de configurações.' });
+      }
+
+      let openRouterModel = model;
+      if (!openRouterModel || openRouterModel.startsWith('gemini-') || openRouterModel.startsWith('gpt-') || openRouterModel.startsWith('claude-')) {
+        openRouterModel = 'anthropic/claude-3.7-sonnet';
+      }
+
+      const openRouterMessages = [
+        { role: 'system', content: systemPrompt },
+        ...messages.slice(-6).map((m: any) => ({
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content: m.content
+        }))
+      ];
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+          'HTTP-Referer': 'https://notebooklm.app',
+          'X-Title': 'NotebookLM Pro'
+        },
+        body: JSON.stringify({
+          model: openRouterModel,
+          messages: openRouterMessages,
+          temperature: 0.2
+        })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `OpenRouter error: HTTP ${response.status}`);
+      }
+
+      const data: any = await response.json();
+      reply = data.choices?.[0]?.message?.content || 'Sem resposta da OpenRouter.';
+      usedModel = openRouterModel;
+    }
+
+    // 3. OpenAI
     else if (provider === 'openai') {
       const key = apiKey || process.env.OPENAI_API_KEY;
       if (!key) {
@@ -827,7 +1041,40 @@ Estrutura:
 
     const fullPrompt = `${artifactPrompt}\n\n--- DOCUMENTOS DO CADERNO ---\n${documentsText.slice(0, 30000)}`;
 
-    // 1. Groq
+    // 1. OpenRouter
+    if (provider === 'openrouter') {
+      const openRouterKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+      if (!openRouterKey) {
+        return res.status(401).json({ error: 'Chave da API OpenRouter não informada. Conecte sua chave no painel de configurações.' });
+      }
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${openRouterKey}`,
+          'HTTP-Referer': 'https://notebooklm.app',
+          'X-Title': 'NotebookLM Pro'
+        },
+        body: JSON.stringify({
+          model: 'anthropic/claude-3.7-sonnet',
+          messages: [{ role: 'user', content: fullPrompt }],
+          temperature: 0.3
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Erro da OpenRouter: HTTP ${response.status}`);
+      }
+      const data: any = await response.json();
+      return res.json({
+        success: true,
+        type,
+        title: notebookTitle,
+        content: data.choices?.[0]?.message?.content || 'Não foi possível gerar o artefato.'
+      });
+    }
+
+    // 2. Groq
     if (provider === 'groq') {
       const groqKey = (apiKey || process.env.GROQ_API_KEY || '').trim();
       if (!groqKey) {
@@ -858,7 +1105,7 @@ Estrutura:
       });
     }
 
-    // 2. OpenAI
+    // 3. OpenAI
     if (provider === 'openai') {
       const openAiKey = (apiKey || process.env.OPENAI_API_KEY || '').trim();
       if (!openAiKey) {
@@ -889,7 +1136,7 @@ Estrutura:
       });
     }
 
-    // 3. Anthropic
+    // 4. Anthropic
     if (provider === 'anthropic') {
       const claudeKey = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
       if (!claudeKey) {
@@ -921,19 +1168,46 @@ Estrutura:
       });
     }
 
-    // 4. Default to Gemini or server key
-    const gemini = getGeminiClient(apiKey);
-    if (gemini) {
-      const response = await gemini.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: fullPrompt
-      });
-      return res.json({
-        success: true,
-        type,
-        title: notebookTitle,
-        content: response.text || 'Não foi possível gerar o artefato.'
-      });
+    // 5. Google Gemini or Server fallback
+    const geminiKey = (apiKey || process.env.GEMINI_API_KEY || '').trim();
+    if (geminiKey) {
+      try {
+        const directResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: fullPrompt }] }],
+            generationConfig: { temperature: 0.2 }
+          })
+        });
+        if (directResp.ok) {
+          const data: any = await directResp.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            return res.json({
+              success: true,
+              type,
+              title: notebookTitle,
+              content: text
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('Gemini studio direct failed, falling to SDK', e);
+      }
+      const gemini = getGeminiClient(geminiKey);
+      if (gemini) {
+        const response = await gemini.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: fullPrompt
+        });
+        return res.json({
+          success: true,
+          type,
+          title: notebookTitle,
+          content: response.text || 'Não foi possível gerar o artefato.'
+        });
+      }
     }
 
     res.status(400).json({ error: 'Configuração de IA necessária para gerar artefatos de estúdio. Conecte sua chave nas configurações.' });

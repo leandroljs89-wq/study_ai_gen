@@ -56,7 +56,27 @@ function formatGroqModelLabel(id: string): string {
   return id;
 }
 
+function formatOpenRouterModelLabel(id: string, name?: string): string {
+  if (name && name !== id) return `${name} (${id.split('/')[0]})`;
+  if (id.includes('claude-3.7-sonnet')) return 'Claude 3.7 Sonnet (Anthropic via OpenRouter)';
+  if (id.includes('claude-3.5-sonnet')) return 'Claude 3.5 Sonnet (Anthropic via OpenRouter)';
+  if (id.includes('deepseek-r1')) return 'DeepSeek R1 (Raciocínio via OpenRouter)';
+  if (id.includes('deepseek-chat') || id.includes('deepseek-v3')) return 'DeepSeek V3 (Chat via OpenRouter)';
+  if (id.includes('llama-3.3-70b')) return 'Llama 3.3 70B (Meta via OpenRouter)';
+  if (id.includes('gemini-2.5-flash')) return 'Gemini 2.5 Flash (Google via OpenRouter)';
+  if (id.includes('gpt-4o')) return 'GPT-4o (OpenAI via OpenRouter)';
+  return id;
+}
+
 const DEFAULT_MODELS: Record<AIProvider, ModelOption[]> = {
+  openrouter: [
+    { id: 'anthropic/claude-3.7-sonnet', name: 'Claude 3.7 Sonnet (OpenRouter)', recommended: true },
+    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 (OpenRouter)', recommended: true },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (OpenRouter)', recommended: true },
+    { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B (OpenRouter)', recommended: false },
+    { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (OpenRouter)', recommended: false },
+    { id: 'openai/gpt-4o', name: 'GPT-4o (OpenAI via OpenRouter)', recommended: false },
+  ],
   gemini: [
     { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Rápido & Inteligente)', recommended: true },
     { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Alta Capacidade)', recommended: false },
@@ -227,13 +247,14 @@ export default function App() {
 
       // 1. Load and sync saved API keys with profile
       const savedKeys = await loadProfileApiKeys(user.id);
-      if (savedKeys && (savedKeys.openai_api_key || savedKeys.anthropic_api_key || savedKeys.gemini_api_key || savedKeys.groq_api_key || savedKeys.ollama_host)) {
+      if (savedKeys && (savedKeys.openai_api_key || savedKeys.anthropic_api_key || savedKeys.gemini_api_key || savedKeys.groq_api_key || savedKeys.openrouter_api_key || savedKeys.ollama_host)) {
         setApiKeys(prev => {
           const merged: UserApiKeys = {
             openai_api_key: savedKeys.openai_api_key || prev.openai_api_key,
             anthropic_api_key: savedKeys.anthropic_api_key || prev.anthropic_api_key,
             gemini_api_key: savedKeys.gemini_api_key || prev.gemini_api_key,
             groq_api_key: savedKeys.groq_api_key || prev.groq_api_key,
+            openrouter_api_key: savedKeys.openrouter_api_key || prev.openrouter_api_key,
             ollama_host: savedKeys.ollama_host || prev.ollama_host
           };
           try {
@@ -244,7 +265,7 @@ export default function App() {
       } else {
         // If profile didn't have keys yet, persist current active local keys to profile
         setApiKeys(currentKeys => {
-          if (currentKeys.openai_api_key || currentKeys.anthropic_api_key || currentKeys.gemini_api_key || currentKeys.groq_api_key) {
+          if (currentKeys.openai_api_key || currentKeys.anthropic_api_key || currentKeys.gemini_api_key || currentKeys.groq_api_key || currentKeys.openrouter_api_key) {
             saveProfileApiKeys(user.id, currentKeys);
           }
           return currentKeys;
@@ -326,10 +347,49 @@ export default function App() {
   const refreshModelsForProvider = useCallback(async (provider: AIProvider, currentKeys: UserApiKeys) => {
     setIsLoadingModels(true);
     let keyToUse = '';
+    if (provider === 'openrouter') keyToUse = (currentKeys.openrouter_api_key || '').trim();
     if (provider === 'gemini') keyToUse = (currentKeys.gemini_api_key || '').trim();
     if (provider === 'openai') keyToUse = (currentKeys.openai_api_key || '').trim();
     if (provider === 'anthropic') keyToUse = (currentKeys.anthropic_api_key || '').trim();
     if (provider === 'groq') keyToUse = (currentKeys.groq_api_key || '').trim();
+
+    // 0. Direct Browser Client Fetch for OpenRouter
+    if (provider === 'openrouter' && keyToUse) {
+      try {
+        const resp = await fetch('https://openrouter.ai/api/v1/models', {
+          headers: {
+            Authorization: `Bearer ${keyToUse}`,
+            'HTTP-Referer': 'https://notebooklm.app',
+            'X-Title': 'NotebookLM Pro'
+          }
+        });
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const openRouterModels = (data.data || [])
+            .filter((m: any) => !m.id.includes('whisper') && !m.id.includes('image') && !m.id.includes('embed'))
+            .map((m: any) => ({
+              id: m.id,
+              name: formatOpenRouterModelLabel(m.id, m.name),
+              recommended: 
+                m.id.includes('claude-3.7') ||
+                m.id.includes('deepseek/deepseek-r1') ||
+                m.id.includes('deepseek/deepseek-chat') ||
+                m.id.includes('llama-3.3-70b') ||
+                m.id.includes('gpt-4o')
+            }))
+            .sort((a: any, b: any) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+
+          if (openRouterModels.length > 0) {
+            setAvailableModels(openRouterModels);
+            setSelectedModel(prev => openRouterModels.some((m: any) => m.id === prev) ? prev : openRouterModels[0].id);
+            setIsLoadingModels(false);
+            return;
+          }
+        }
+      } catch (clientErr) {
+        console.warn('Direct OpenRouter models fetch fallback:', clientErr);
+      }
+    }
 
     // 1. Direct Browser Client Fetch for Groq (Instant & Full list)
     if (provider === 'groq' && keyToUse) {
@@ -695,6 +755,7 @@ export default function App() {
 
       // 3. STEP 3: Dispatch to Server or Direct Client with Context Optimization
       let activeKey = '';
+      if (activeProvider === 'openrouter') activeKey = (apiKeys.openrouter_api_key || '').trim();
       if (activeProvider === 'gemini') activeKey = (apiKeys.gemini_api_key || '').trim();
       if (activeProvider === 'openai') activeKey = (apiKeys.openai_api_key || '').trim();
       if (activeProvider === 'anthropic') activeKey = (apiKeys.anthropic_api_key || '').trim();
@@ -702,7 +763,11 @@ export default function App() {
 
       // Ensure model is valid for the active provider
       let modelToSend = selectedModel;
-      if (activeProvider === 'groq') {
+      if (activeProvider === 'openrouter') {
+        if (!modelToSend) {
+          modelToSend = 'anthropic/claude-3.7-sonnet';
+        }
+      } else if (activeProvider === 'groq') {
         if (!modelToSend || modelToSend.startsWith('gemini') || modelToSend.startsWith('gpt') || modelToSend.startsWith('claude')) {
           modelToSend = 'llama-3.3-70b-versatile';
         }
@@ -739,8 +804,59 @@ export default function App() {
       } catch (serverErr: any) {
         console.warn('Server chat call failed, trying direct browser client fallback:', serverErr);
 
-        // Direct Browser Client Fallback for Groq (Zero Latency & 100% Vercel reliability)
-        if (activeProvider === 'groq' && activeKey) {
+        // Direct Browser Client Fallback for OpenRouter
+        if (activeProvider === 'openrouter' && activeKey) {
+          const systemPrompt = `Você é o assistente inteligente de pesquisa e síntese de documentos integrado ao NotebookLM ("${activeNotebook.title}").
+Responda às dúvidas com precisão cirúrgica, baseando-se nas fontes recuperadas quando disponíveis.
+${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + formattedChunks.map((c, i) => `[Fonte #${i+1} | "${c.documentName}"]:\n"${c.content}"`).join('\n\n') : ''}`;
+
+          const directResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${activeKey}`,
+              'HTTP-Referer': 'https://notebooklm.app',
+              'X-Title': 'NotebookLM Pro'
+            },
+            body: JSON.stringify({
+              model: modelToSend || 'anthropic/claude-3.7-sonnet',
+              messages: [
+                { role: 'system', content: systemPrompt },
+                ...updatedMessages.slice(-6).map(m => ({
+                  role: m.role === 'assistant' ? 'assistant' : 'user',
+                  content: m.content
+                }))
+              ],
+              temperature: 0.3
+            })
+          });
+
+          if (!directResp.ok) {
+            const errJson = await directResp.json().catch(() => ({}));
+            throw new Error(errJson.error?.message || `Erro da OpenRouter: HTTP ${directResp.status}`);
+          }
+
+          const directData: any = await directResp.json();
+          data = {
+            content: directData.choices?.[0]?.message?.content || 'Sem resposta da OpenRouter.',
+            provider: 'openrouter',
+            model: modelToSend,
+            sources: formattedChunks.map((c, i) => ({
+              index: i + 1,
+              documentId: c.documentId,
+              documentName: c.documentName,
+              similarity: c.similarity,
+              snippet: c.content ? c.content.slice(0, 180) + '...' : ''
+            })),
+            tokensStats: {
+              retrievedChunksCount: formattedChunks.length,
+              estimatedPromptTokens: Math.round(userText.length / 4),
+              estimatedTokensSaved: 10000,
+              savingsPercentage: 90
+            }
+          };
+        } else if (activeProvider === 'groq' && activeKey) {
+          // Direct Browser Client Fallback for Groq (Zero Latency & 100% Vercel reliability)
           const systemPrompt = `Você é o assistente inteligente de pesquisa e síntese de documentos integrado ao NotebookLM ("${activeNotebook.title}").
 Responda às dúvidas com precisão cirúrgica, baseando-se nas fontes recuperadas quando disponíveis.
 ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + formattedChunks.map((c, i) => `[Fonte #${i+1} | "${c.documentName}"]:\n"${c.content}"`).join('\n\n') : ''}`;
@@ -934,7 +1050,9 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
   };
 
   const isCurrentProviderConnected = 
-    activeProvider === 'gemini' 
+    activeProvider === 'openrouter'
+      ? !!apiKeys.openrouter_api_key
+      : activeProvider === 'gemini' 
       ? true 
       : activeProvider === 'openai' 
       ? !!apiKeys.openai_api_key 
@@ -968,6 +1086,7 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
         hasOpenAiKey={!!apiKeys.openai_api_key}
         hasAnthropicKey={!!apiKeys.anthropic_api_key}
         hasGroqKey={!!apiKeys.groq_api_key}
+        hasOpenRouterKey={!!apiKeys.openrouter_api_key}
         currentUser={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         isSupabaseConnected={supabaseConfig.connected || !!(supabaseConfig.url && supabaseConfig.anonKey)}
@@ -1037,7 +1156,9 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
             documents={activeNotebook.documents}
             activeProvider={activeProvider}
             apiKey={
-              activeProvider === 'groq'
+              activeProvider === 'openrouter'
+                ? apiKeys.openrouter_api_key
+                : activeProvider === 'groq'
                 ? apiKeys.groq_api_key
                 : activeProvider === 'openai'
                 ? apiKeys.openai_api_key

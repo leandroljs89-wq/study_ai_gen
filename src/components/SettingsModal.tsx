@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     anthropic_api_key TEXT,
     gemini_api_key TEXT,
     groq_api_key TEXT,
+    openrouter_api_key TEXT,
     ollama_host TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
@@ -253,6 +254,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   
   // Connection states per provider
   const [statusByProvider, setStatusByProvider] = useState<Record<string, ProviderStatus>>({
+    openrouter: { testing: false, connected: !!apiKeys.openrouter_api_key },
     gemini: { testing: false, connected: true, message: 'Google Gemini ativo e pronto.' },
     openai: { testing: false, connected: !!apiKeys.openai_api_key },
     anthropic: { testing: false, connected: !!apiKeys.anthropic_api_key },
@@ -310,6 +312,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }));
 
     let keyToSend = '';
+    if (provider === 'openrouter') keyToSend = (keysForm.openrouter_api_key || '').trim();
     if (provider === 'gemini') keyToSend = (keysForm.gemini_api_key || '').trim();
     if (provider === 'openai') keyToSend = (keysForm.openai_api_key || '').trim();
     if (provider === 'anthropic') keyToSend = (keysForm.anthropic_api_key || '').trim();
@@ -325,6 +328,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
       }));
       return;
+    }
+
+    // Direct Browser Client Validation for OpenRouter
+    if (provider === 'openrouter' && keyToSend) {
+      try {
+        const resp = await fetch('https://openrouter.ai/api/v1/auth/key', {
+          headers: {
+            Authorization: `Bearer ${keyToSend}`,
+            'HTTP-Referer': 'https://notebooklm.app',
+            'X-Title': 'NotebookLM Pro'
+          }
+        });
+        if (resp.ok) {
+          const keyData: any = await resp.json().catch(() => ({}));
+          const label = keyData.data?.label || '';
+          const limit = keyData.data?.limit !== null && keyData.data?.limit !== undefined ? ` (Crédito: $${keyData.data.limit})` : '';
+          setStatusByProvider(prev => ({
+            ...prev,
+            openrouter: {
+              testing: false,
+              connected: true,
+              message: `OpenRouter conectada com sucesso! ${label}${limit}`
+            }
+          }));
+          onSaveApiKeys(keysForm);
+          if (currentUser) {
+            saveProfileApiKeys(currentUser.id, keysForm);
+          }
+          return;
+        } else {
+          // Fallback to checking models endpoint
+          const modelsResp = await fetch('https://openrouter.ai/api/v1/models', {
+            headers: { Authorization: `Bearer ${keyToSend}` }
+          });
+          if (modelsResp.ok) {
+            setStatusByProvider(prev => ({
+              ...prev,
+              openrouter: {
+                testing: false,
+                connected: true,
+                message: 'OpenRouter conectada com sucesso! Modelos liberados.'
+              }
+            }));
+            onSaveApiKeys(keysForm);
+            if (currentUser) {
+              saveProfileApiKeys(currentUser.id, keysForm);
+            }
+            return;
+          }
+          const err = await resp.json().catch(() => ({}));
+          setStatusByProvider(prev => ({
+            ...prev,
+            openrouter: {
+              testing: false,
+              connected: false,
+              message: err.error?.message || `Chave OpenRouter inválida (HTTP ${resp.status})`
+            }
+          }));
+          return;
+        }
+      } catch (directErr) {
+        console.warn('Direct OpenRouter validation fallback to server:', directErr);
+      }
     }
 
     // Direct Browser Client Validation for Groq (Instant, 0 Latency)
@@ -634,6 +700,78 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <p className="leading-relaxed">
                   Digite sua chave de API e clique em <strong>"Testar & Conectar"</strong>. O sistema realiza um handshake instantâneo com o provedor via proxy seguro no backend, validando a autenticação e liberando os modelos imediatamente no cabeçalho.
                 </p>
+              </div>
+
+              {/* Provider Card 0: OpenRouter (Multi-Model Hub) */}
+              <div className="p-3.5 border border-indigo-200/80 rounded-xl bg-indigo-50/20 space-y-2 hover:border-indigo-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
+                    <span className="text-xs font-bold text-stone-900">OpenRouter (Multi-Modelos)</span>
+                    <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-semibold">
+                      Claude 3.7, DeepSeek R1/V3, Llama 3.3, Gemini 2.5
+                    </span>
+                  </div>
+                  <div>
+                    {statusByProvider['openrouter']?.connected ? (
+                      <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="w-3 h-3" /> Conectado
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-stone-500">Chave necessária</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showKeys['openrouter'] ? 'text' : 'password'}
+                      placeholder="sk-or-v1-..."
+                      value={keysForm.openrouter_api_key || ''}
+                      onChange={(e) => setKeysForm({ ...keysForm, openrouter_api_key: e.target.value })}
+                      className="w-full px-3 py-1.5 pr-8 text-xs font-mono border border-stone-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-600 bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggleShowKey('openrouter')}
+                      className="absolute right-2 top-2 text-stone-400 hover:text-stone-600"
+                    >
+                      {showKeys['openrouter'] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleConnectProvider('openrouter')}
+                    disabled={statusByProvider['openrouter']?.testing || !keysForm.openrouter_api_key}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs"
+                  >
+                    {statusByProvider['openrouter']?.testing ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <PlugZap className="w-3.5 h-3.5 text-indigo-200" />
+                    )}
+                    Testar & Conectar
+                  </button>
+
+                  {keysForm.openrouter_api_key && (
+                    <button
+                      type="button"
+                      onClick={() => handleClearKey('openrouter_api_key', 'openrouter')}
+                      title="Desconectar chave"
+                      className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {statusByProvider['openrouter']?.message && (
+                  <p className={`text-[11px] font-medium ${statusByProvider['openrouter']?.connected ? 'text-emerald-700' : 'text-red-600'}`}>
+                    {statusByProvider['openrouter']?.message}
+                  </p>
+                )}
               </div>
 
               {/* Provider Card 1: Google Gemini */}

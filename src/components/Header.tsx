@@ -48,6 +48,7 @@ interface HeaderProps {
   hasOpenAiKey: boolean;
   hasAnthropicKey: boolean;
   hasGroqKey: boolean;
+  hasOpenRouterKey?: boolean;
 
   currentUser?: User | null;
   onOpenAuthModal?: () => void;
@@ -55,10 +56,11 @@ interface HeaderProps {
 }
 
 const PROVIDER_NAMES: Record<AIProvider, { label: string; badge: string; color: string }> = {
+  openrouter: { label: 'OpenRouter (Multi-Modelos)', badge: 'OpenRouter', color: 'bg-indigo-600 text-white' },
   gemini: { label: 'Google Gemini', badge: 'Gemini', color: 'bg-blue-600 text-white' },
+  groq: { label: 'Groq LPUs', badge: 'Groq Fast', color: 'bg-orange-600 text-white' },
   openai: { label: 'OpenAI', badge: 'GPT', color: 'bg-emerald-600 text-white' },
   anthropic: { label: 'Anthropic Claude', badge: 'Claude', color: 'bg-amber-600 text-white' },
-  groq: { label: 'Groq LPUs', badge: 'Groq Fast', color: 'bg-orange-600 text-white' },
   ollama: { label: 'Ollama (Local)', badge: 'Local', color: 'bg-purple-600 text-white' },
 };
 
@@ -83,6 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
   hasOpenAiKey,
   hasAnthropicKey,
   hasGroqKey,
+  hasOpenRouterKey,
   currentUser,
   onOpenAuthModal,
   isSupabaseConnected
@@ -108,10 +111,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   // Provider status indicator
   const isCurrentProviderConfigured = 
+    (activeProvider === 'openrouter' && (hasOpenRouterKey || false)) ||
     (activeProvider === 'gemini' && hasGeminiKey) ||
+    (activeProvider === 'groq' && hasGroqKey) ||
     (activeProvider === 'openai' && hasOpenAiKey) ||
     (activeProvider === 'anthropic' && hasAnthropicKey) ||
-    (activeProvider === 'groq' && hasGroqKey) ||
     activeProvider === 'ollama';
 
   return (
@@ -239,10 +243,11 @@ export const Header: React.FC<HeaderProps> = ({
             onChange={(e) => onSelectProvider(e.target.value as AIProvider)}
             className="appearance-none bg-white font-medium text-xs md:text-sm text-stone-800 pl-3 pr-7 py-1.5 rounded-lg border border-stone-200 shadow-2xs hover:border-stone-300 focus:outline-hidden focus:ring-1 focus:ring-stone-800 cursor-pointer"
           >
+            <option value="openrouter">OpenRouter (Claude, DeepSeek, Llama...)</option>
             <option value="gemini">Google Gemini</option>
+            <option value="groq">Groq (LPUs Rápidas)</option>
             <option value="openai">OpenAI (GPT)</option>
             <option value="anthropic">Anthropic (Claude)</option>
-            <option value="groq">Groq (LPUs Rápidas)</option>
             <option value="ollama">Ollama (Local)</option>
           </select>
           <ChevronDown className="w-3.5 h-3.5 text-stone-600 absolute right-2 pointer-events-none" />
