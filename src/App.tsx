@@ -27,7 +27,8 @@ import {
   fetchChatMessagesFromSupabase, 
   persistChatMessageToSupabase, 
   clearChatMessagesFromSupabase, 
-  syncFullNotebook 
+  syncFullNotebook,
+  verifyUserAccessStatus
 } from './lib/supabaseClient';
 import { generateUUID, ensureUUID } from './lib/uuid';
 import { apiFetch } from './lib/apiHelper';
@@ -41,6 +42,8 @@ import { AddNoteModal } from './components/AddNoteModal';
 import { DocumentViewerModal } from './components/DocumentViewerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SupabaseAuthModal } from './components/SupabaseAuthModal';
+import { AdminUsersModal } from './components/AdminUsersModal';
+import { SubscriptionExpiredModal } from './components/SubscriptionExpiredModal';
 
 function formatGroqModelLabel(id: string): string {
   if (id === 'llama-3.3-70b-versatile') return 'Llama 3.3 70B Versatile (Recomendado)';
@@ -111,66 +114,40 @@ const DEFAULT_MODELS: Record<AIProvider, ModelOption[]> = {
   ],
 };
 
+const defaultGuestNotebook: Notebook = {
+  id: '00000000-0000-4000-8000-000000000000',
+  title: 'Meu Caderno de Estudos',
+  description: 'Faça login com sua conta para criar cadernos privados, adicionar fontes e conversar com a IA.',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  documents: [],
+  notes: []
+};
+
 export default function App() {
-  // Notebooks state (with UUID sanitization)
-  const [notebooks, setNotebooks] = useState<Notebook[]>(() => {
-    try {
-      const saved = localStorage.getItem('notebooklm_notebooks');
-      if (saved) {
-        const parsed: Notebook[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(nb => ({
-            ...nb,
-            id: ensureUUID(nb.id),
-            documents: (nb.documents || []).map(d => ({
-              ...d,
-              id: ensureUUID(d.id),
-              notebook_id: ensureUUID(nb.id),
-              chunks: (d.chunks || []).map(c => ({
-                ...c,
-                id: ensureUUID(c.id),
-                document_id: ensureUUID(d.id)
-              }))
-            })),
-            notes: (nb.notes || []).map(n => ({
-              ...n,
-              id: ensureUUID(n.id),
-              notebook_id: ensureUUID(nb.id)
-            }))
-          }));
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to load notebooks from localStorage', e);
-    }
-    return [sampleNotebook];
-  });
-
-  const [activeNotebookId, setActiveNotebookId] = useState<string>(() => {
-    try {
-      const savedId = localStorage.getItem('notebooklm_active_id');
-      if (savedId && notebooks.some(n => n.id === savedId)) return savedId;
-    } catch (e) {}
-    return notebooks[0]?.id || sampleNotebook.id;
-  });
-
-  // Active notebook helper
-  const activeNotebook = notebooks.find(n => n.id === activeNotebookId) || notebooks[0] || sampleNotebook;
-
-  // Save notebooks to localStorage on change
-  useEffect(() => {
-    try {
-      localStorage.setItem('notebooklm_notebooks', JSON.stringify(notebooks));
-      localStorage.setItem('notebooklm_active_id', activeNotebookId);
-    } catch (e) {
-      console.warn('LocalStorage save error:', e);
-    }
-  }, [notebooks, activeNotebookId]);
-
   // Supabase Auth & User state
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSyncingWithSupabase, setIsSyncingWithSupabase] = useState(false);
+
+  // Notebooks state initialized safely per user
+  const [notebooks, setNotebooks] = useState<Notebook[]>([defaultGuestNotebook]);
+  const [activeNotebookId, setActiveNotebookId] = useState<string>(defaultGuestNotebook.id);
+
+  // Active notebook helper
+  const activeNotebook = notebooks.find(n => n.id === activeNotebookId) || notebooks[0] || defaultGuestNotebook;
+
+  // Save notebooks to scoped localStorage when user is logged in
+  useEffect(() => {
+    try {
+      if (currentUser?.id) {
+        localStorage.setItem(`notebooklm_notebooks_${currentUser.id}`, JSON.stringify(notebooks));
+        localStorage.setItem(`notebooklm_active_id_${currentUser.id}`, activeNotebookId);
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error:', e);
+    }
+  }, [notebooks, activeNotebookId, currentUser?.id]);
 
   // AI Providers & Models state
   const [activeProvider, setActiveProvider] = useState<AIProvider>(() => {
@@ -233,11 +210,18 @@ export default function App() {
   // UI state
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
   const [isAddNoteOpen, setIsAddNoteOpen] = useState(false);
   const [viewingDocument, setViewingDocument] = useState<NotebookDocument | null>(null);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatInputText, setChatInputText] = useState('');
+  const [userAccessRestricted, setUserAccessRestricted] = useState<{
+    restricted: boolean;
+    reason: 'expired' | 'suspended' | 'not_found';
+    plan?: string;
+    expiresAt?: string | null;
+  } | null>(null);
 
   // Refs to prevent unwanted re-fetching and UI jumping loops
   const notebooksRef = React.useRef(notebooks);
@@ -248,8 +232,50 @@ export default function App() {
 
   const syncedUserIdRef = React.useRef<string | null>(null);
 
+  const handleSignOut = () => {
+    const sb = getSupabase(supabaseConfig.url, supabaseConfig.anonKey);
+    if (sb) {
+      sb.auth.signOut().catch(() => {});
+    }
+    setCurrentUser(null);
+    syncedUserIdRef.current = null;
+    setUserAccessRestricted(null);
+    setNotebooks([defaultGuestNotebook]);
+    setActiveNotebookId(defaultGuestNotebook.id);
+    setChatHistories({});
+    const emptyKeys: UserApiKeys = {
+      openai_api_key: '',
+      anthropic_api_key: '',
+      gemini_api_key: '',
+      groq_api_key: '',
+      openrouter_api_key: '',
+      ollama_host: ''
+    };
+    setApiKeys(emptyKeys);
+    try {
+      localStorage.removeItem('notebooklm_api_keys');
+    } catch (e) {}
+  };
+
   // Supabase Auth listener & auto-sync (runs cleanly ONCE per user session)
   const handleUserAuthenticated = useCallback(async (user: User) => {
+    // 0. Verify User Subscription & Access Permissions (Admin leandroljs89@gmail.com is always allowed)
+    try {
+      const accessCheck = await verifyUserAccessStatus(user.id, user.email);
+      if (!accessCheck.allowed) {
+        setUserAccessRestricted({
+          restricted: true,
+          reason: accessCheck.reason || 'expired',
+          plan: accessCheck.plan,
+          expiresAt: accessCheck.expiresAt
+        });
+      } else {
+        setUserAccessRestricted(null);
+      }
+    } catch {
+      setUserAccessRestricted(null);
+    }
+
     // Avoid double syncing if already synced for this user ID
     if (syncedUserIdRef.current === user.id) {
       return;
@@ -260,31 +286,36 @@ export default function App() {
       setIsSyncingWithSupabase(true);
       await ensureUserProfile(user);
 
-      // 1. Load and sync saved API keys with profile
+      // 1. Load saved API keys strictly for this authenticated user profile from Supabase
       const savedKeys = await loadProfileApiKeys(user.id);
       if (savedKeys && (savedKeys.openai_api_key || savedKeys.anthropic_api_key || savedKeys.gemini_api_key || savedKeys.groq_api_key || savedKeys.openrouter_api_key || savedKeys.ollama_host)) {
-        setApiKeys(prev => {
-          const merged: UserApiKeys = {
-            openai_api_key: savedKeys.openai_api_key || prev.openai_api_key,
-            anthropic_api_key: savedKeys.anthropic_api_key || prev.anthropic_api_key,
-            gemini_api_key: savedKeys.gemini_api_key || prev.gemini_api_key,
-            groq_api_key: savedKeys.groq_api_key || prev.groq_api_key,
-            openrouter_api_key: savedKeys.openrouter_api_key || prev.openrouter_api_key,
-            ollama_host: savedKeys.ollama_host || prev.ollama_host
-          };
-          try {
-            localStorage.setItem('notebooklm_api_keys', JSON.stringify(merged));
-          } catch (e) {}
-          return merged;
-        });
+        const userKeys: UserApiKeys = {
+          openai_api_key: savedKeys.openai_api_key || '',
+          anthropic_api_key: savedKeys.anthropic_api_key || '',
+          gemini_api_key: savedKeys.gemini_api_key || '',
+          groq_api_key: savedKeys.groq_api_key || '',
+          openrouter_api_key: savedKeys.openrouter_api_key || '',
+          ollama_host: savedKeys.ollama_host || ''
+        };
+        setApiKeys(userKeys);
+        try {
+          localStorage.setItem('notebooklm_api_keys', JSON.stringify(userKeys));
+        } catch (e) {}
       } else {
-        // If profile didn't have keys yet, persist current active local keys to profile
-        setApiKeys(currentKeys => {
-          if (currentKeys.openai_api_key || currentKeys.anthropic_api_key || currentKeys.gemini_api_key || currentKeys.groq_api_key || currentKeys.openrouter_api_key) {
-            saveProfileApiKeys(user.id, currentKeys);
-          }
-          return currentKeys;
-        });
+        // User profile has no API keys saved yet. Start with clean empty keys strictly for this user!
+        // Do NOT carry over or inherit previous user's / local guest's keys.
+        const emptyKeys: UserApiKeys = {
+          openai_api_key: '',
+          anthropic_api_key: '',
+          gemini_api_key: '',
+          groq_api_key: '',
+          openrouter_api_key: '',
+          ollama_host: ''
+        };
+        setApiKeys(emptyKeys);
+        try {
+          localStorage.setItem('notebooklm_api_keys', JSON.stringify(emptyKeys));
+        } catch (e) {}
       }
 
       // 2. Fetch remote notebooks from Supabase
@@ -301,16 +332,25 @@ export default function App() {
 
         // Fetch chat messages for active notebook
         const msgs = await fetchChatMessagesFromSupabase(targetId);
-        if (msgs && msgs.length > 0) {
-          setChatHistories(prev => ({ ...prev, [targetId]: msgs }));
-        }
+        setChatHistories({ [targetId]: msgs || [] });
       } else {
-        // User has no notebooks in Supabase yet.
-        // Persist the current local notebook(s) so their initial workspace is in the database!
-        const localList = notebooksRef.current;
-        for (const nb of localList) {
-          await persistNotebookToSupabase(nb, user.id);
-        }
+        // User is freshly registered and has NO notebooks in Supabase yet.
+        // DO NOT upload data from memory! Create a fresh, pristine notebook for this user:
+        const freshId = generateUUID();
+        const freshNotebook: Notebook = {
+          id: freshId,
+          user_id: user.id,
+          title: 'Meu Primeiro Caderno',
+          description: 'Caderno pessoal para seus estudos, notas e documentos.',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          documents: [],
+          notes: []
+        };
+        await persistNotebookToSupabase(freshNotebook, user.id);
+        setNotebooks([freshNotebook]);
+        setActiveNotebookId(freshId);
+        setChatHistories({ [freshId]: [] });
       }
     } catch (err) {
       console.error('Erro ao sincronizar com usuário autenticado:', err);
@@ -347,8 +387,7 @@ export default function App() {
           await handleUserAuthenticated(session.user);
         }
       } else {
-        setCurrentUser(null);
-        syncedUserIdRef.current = null;
+        handleSignOut();
       }
     });
 
@@ -1121,6 +1160,7 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
         currentUser={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         isSupabaseConnected={supabaseConfig.connected || !!(supabaseConfig.url && supabaseConfig.anonKey)}
+        onOpenAdminModal={() => setIsAdminOpen(true)}
       />
 
       {/* RLS Persist Notification Banner when Supabase is configured but user is not logged in */}
@@ -1150,14 +1190,28 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
             notes={activeNotebook.notes}
             onToggleDocumentRag={handleToggleDocumentRag}
             onToggleAllDocumentsRag={handleToggleAllDocumentsRag}
-            onOpenAddSource={() => setIsAddSourceOpen(true)}
-            onOpenAddNote={() => setIsAddNoteOpen(true)}
+            onOpenAddSource={() => {
+              if (!currentUser) {
+                setIsAuthModalOpen(true);
+                return;
+              }
+              setIsAddSourceOpen(true);
+            }}
+            onOpenAddNote={() => {
+              if (!currentUser) {
+                setIsAuthModalOpen(true);
+                return;
+              }
+              setIsAddNoteOpen(true);
+            }}
             onViewDocument={(doc) => setViewingDocument(doc)}
             onDeleteDocument={handleDeleteDocument}
             onDeleteNote={handleDeleteNote}
             onInsertNoteToChat={(text) => {
               setChatInputText(text);
             }}
+            currentUser={currentUser}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
           />
         </div>
 
@@ -1176,6 +1230,8 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
           setInputText={setChatInputText}
           onOpenSettings={() => setIsSettingsOpen(true)}
           isCurrentProviderConnected={isCurrentProviderConnected}
+          currentUser={currentUser}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
         />
 
         {/* Right Column: Studio Panel (NotebookLM Audio Overview, Study Guide, FAQ) */}
@@ -1199,6 +1255,8 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
             }
             geminiApiKey={apiKeys.gemini_api_key}
             onSaveAsNote={handleSaveAsNote}
+            currentUser={currentUser}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
           />
         )}
       </div>
@@ -1237,6 +1295,7 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
         onSaveRagParams={setRagParams}
         currentUser={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenAdminModal={() => setIsAdminOpen(true)}
       />
 
       <SupabaseAuthModal
@@ -1247,10 +1306,31 @@ ${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + f
           setCurrentUser(user);
           await handleUserAuthenticated(user);
         }}
-        onSignOut={() => {
-          setCurrentUser(null);
-        }}
+        onSignOut={handleSignOut}
         onSyncLocalData={handleSyncWithSupabase}
+      />
+
+      {/* 4. ADMIN & SALES MANAGEMENT MODAL (leandroljs89@gmail.com) */}
+      <AdminUsersModal
+        isOpen={isAdminOpen}
+        onClose={() => setIsAdminOpen(false)}
+        currentUser={currentUser}
+        supabaseUrl={supabaseConfig.url}
+        supabaseAnonKey={supabaseConfig.anonKey}
+      />
+
+      {/* 5. SUBSCRIPTION EXPIRED / SUSPENDED BLOCKER MODAL */}
+      <SubscriptionExpiredModal
+        isOpen={!!userAccessRestricted?.restricted}
+        onClose={() => {
+          // Allow closing or prompt login
+          setUserAccessRestricted(null);
+        }}
+        reason={userAccessRestricted?.reason || 'expired'}
+        plan={userAccessRestricted?.plan}
+        expiresAt={userAccessRestricted?.expiresAt}
+        userEmail={currentUser?.email || undefined}
+        onSignOut={handleSignOut}
       />
     </div>
   );

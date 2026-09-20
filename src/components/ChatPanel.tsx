@@ -17,10 +17,13 @@ import {
   ArrowRight,
   ShieldCheck,
   Cpu,
-  Key
+  Key,
+  Lock,
+  LogIn
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { ChatMessage, ChatSourceCitation, NotebookDocument, AIProvider } from '../types';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -36,6 +39,8 @@ interface ChatPanelProps {
   setInputText: (text: string) => void;
   onOpenSettings?: () => void;
   isCurrentProviderConnected?: boolean;
+  currentUser?: SupabaseUser | null;
+  onOpenAuthModal?: () => void;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -51,7 +56,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   inputText,
   setInputText,
   onOpenSettings,
-  isCurrentProviderConnected = true
+  isCurrentProviderConnected = true,
+  currentUser,
+  onOpenAuthModal
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<ChatSourceCitation | null>(null);
@@ -70,6 +77,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      onOpenAuthModal?.();
+      return;
+    }
     if (!inputText.trim() || isLoading) return;
     onSendMessage(inputText.trim());
     setInputText('');
@@ -153,6 +164,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                   <button
                     key={idx}
                     onClick={() => {
+                      if (!currentUser) {
+                        onOpenAuthModal?.();
+                        return;
+                      }
                       setInputText(prompt);
                       textareaRef.current?.focus();
                     }}
@@ -331,56 +346,85 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
       {/* Bottom Input Box */}
       <div className="p-3 md:p-4 bg-white border-t border-stone-200">
-        <form onSubmit={handleSubmit} className="max-w-3xl mx-auto relative">
-          {/* Missing Key Banner */}
-          {!isCurrentProviderConnected && (
-            <div className="mb-2 p-2.5 bg-amber-50 border border-amber-300/80 rounded-xl flex items-center justify-between text-xs text-amber-950 shadow-2xs">
-              <div className="flex items-center gap-2">
-                <Key className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>
-                  O provedor <strong>{activeProvider.toUpperCase()}</strong> ainda não está conectado com sua chave de API.
-                </span>
+        {!currentUser ? (
+          <div className="max-w-3xl mx-auto p-4 bg-linear-to-r from-stone-900 via-stone-800 to-stone-900 text-white rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md border border-stone-700/80">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-400/30 flex items-center justify-center shrink-0">
+                <Lock className="w-5 h-5" />
               </div>
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-lg font-semibold text-xs transition-colors shrink-0 shadow-2xs"
-              >
-                Conectar Chave
-              </button>
-            </div>
-          )}
-
-          <div className="relative rounded-2xl border border-stone-300 focus-within:border-stone-800 focus-within:ring-1 focus-within:ring-stone-800 bg-stone-50/50 shadow-2xs transition-all">
-            <textarea
-              id="input-chat-query"
-              ref={textareaRef}
-              rows={2}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={`Pergunte algo sobre "${activeNotebookTitle}"... (Enter para enviar)`}
-              className="w-full bg-transparent px-4 pt-3 pb-10 text-sm text-stone-900 placeholder:text-stone-600 focus:outline-hidden resize-none"
-            />
-
-            <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-[11px] text-stone-600">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>RAG Híbrido Ativo</span>
+              <div>
+                <h4 className="text-xs font-bold text-stone-100 flex items-center gap-1.5">
+                  <span>Acesso Restrito: Faça Login</span>
+                  <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 text-[10px] font-mono">
+                    AUTENTICAÇÃO NECESSÁRIA
+                  </span>
+                </h4>
+                <p className="text-[11px] text-stone-300 mt-0.5">
+                  Conecte-se com a sua conta para enviar mensagens para a IA, realizar buscas RAG e salvar seus cadernos de forma privada.
+                </p>
               </div>
-
-              <button
-                id="btn-send-chat"
-                type="submit"
-                disabled={!inputText.trim() || isLoading}
-                className="p-2 bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white rounded-xl transition-colors shadow-2xs flex items-center justify-center cursor-pointer"
-                title="Enviar pergunta"
-              >
-                <Send className="w-4 h-4" />
-              </button>
             </div>
+            <button
+              id="btn-chat-login-prompt"
+              type="button"
+              onClick={onOpenAuthModal}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm shrink-0 cursor-pointer flex items-center gap-1.5 border border-amber-400/40"
+            >
+              <LogIn className="w-3.5 h-3.5" /> Fazer Login / Entrar
+            </button>
           </div>
-        </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto relative">
+            {/* Missing Key Banner */}
+            {!isCurrentProviderConnected && (
+              <div className="mb-2 p-2.5 bg-amber-50 border border-amber-300/80 rounded-xl flex items-center justify-between text-xs text-amber-950 shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    O provedor <strong>{activeProvider.toUpperCase()}</strong> ainda não está conectado com sua chave de API.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-lg font-semibold text-xs transition-colors shrink-0 shadow-2xs"
+                >
+                  Conectar Chave
+                </button>
+              </div>
+            )}
+
+            <div className="relative rounded-2xl border border-stone-300 focus-within:border-stone-800 focus-within:ring-1 focus-within:ring-stone-800 bg-stone-50/50 shadow-2xs transition-all">
+              <textarea
+                id="input-chat-query"
+                ref={textareaRef}
+                rows={2}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={`Pergunte algo sobre "${activeNotebookTitle}"... (Enter para enviar)`}
+                className="w-full bg-transparent px-4 pt-3 pb-10 text-sm text-stone-900 placeholder:text-stone-600 focus:outline-hidden resize-none"
+              />
+
+              <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[11px] text-stone-600">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span>RAG Híbrido Ativo</span>
+                </div>
+
+                <button
+                  id="btn-send-chat"
+                  type="submit"
+                  disabled={!inputText.trim() || isLoading}
+                  className="p-2 bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white rounded-xl transition-colors shadow-2xs flex items-center justify-center cursor-pointer"
+                  title="Enviar pergunta"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
       </div>
     </main>
   );

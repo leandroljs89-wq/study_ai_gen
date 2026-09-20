@@ -113,3 +113,24 @@ export interface StudioArtifact {
   content: string;
   created_at: string;
 }
+
+export const ADMIN_EMAIL = 'leandroljs89@gmail.com';
+
+export type UserAccessPlan = 'free' | 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime' | 'custom';
+export type UserAccessStatus = 'active' | 'suspended' | 'expired' | 'pending';
+
+export interface ManagedUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: 'admin' | 'user';
+  plan: UserAccessPlan;
+  status: UserAccessStatus;
+  expires_at?: string | null;
+  created_at: string;
+  notes?: string;
+  price_paid?: number;
+  phone_whatsapp?: string;
+  temporary_password?: string;
+}
+

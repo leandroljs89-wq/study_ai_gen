@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { NotebookDocument, QuickNote, DocumentType } from '../types';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
+import { User } from '@supabase/supabase-js';
 
 interface SourcesPanelProps {
   documents: NotebookDocument[];
@@ -31,6 +32,8 @@ interface SourcesPanelProps {
   onDeleteDocument: (docId: string) => void;
   onDeleteNote: (noteId: string) => void;
   onInsertNoteToChat?: (text: string) => void;
+  currentUser?: User | null;
+  onOpenAuthModal?: () => void;
 }
 
 const getDocumentIcon = (type: DocumentType) => {
@@ -59,7 +62,9 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({
   onViewDocument,
   onDeleteDocument,
   onDeleteNote,
-  onInsertNoteToChat
+  onInsertNoteToChat,
+  currentUser,
+  onOpenAuthModal
 }) => {
   const [activeTab, setActiveTab] = useState<'sources' | 'notes'>('sources');
   const [docToDelete, setDocToDelete] = useState<NotebookDocument | null>(null);
@@ -68,6 +73,22 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({
   const activeRagCount = documents.filter(d => d.enabledInRag).length;
   const allSelected = documents.length > 0 && activeRagCount === documents.length;
   const totalChunks = documents.reduce((acc, d) => acc + (d.chunks?.length || d.chunksCount || 0), 0);
+
+  const handleAddSourceClick = () => {
+    if (!currentUser) {
+      onOpenAuthModal?.();
+      return;
+    }
+    onOpenAddSource();
+  };
+
+  const handleAddNoteClick = () => {
+    if (!currentUser) {
+      onOpenAuthModal?.();
+      return;
+    }
+    onOpenAddNote();
+  };
 
   return (
     <aside className="w-full h-full flex flex-col bg-stone-50/70 border-r border-stone-200 select-none">
@@ -102,7 +123,7 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({
           {activeTab === 'sources' ? (
             <button
               id="btn-add-source"
-              onClick={onOpenAddSource}
+              onClick={handleAddSourceClick}
               className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors shadow-2xs"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -111,7 +132,7 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({
           ) : (
             <button
               id="btn-add-note"
-              onClick={onOpenAddNote}
+              onClick={handleAddNoteClick}
               className="flex items-center gap-1 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-medium transition-colors shadow-2xs"
             >
               <Plus className="w-3.5 h-3.5" />

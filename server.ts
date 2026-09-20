@@ -5,6 +5,7 @@ import { createRequire } from 'module';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -1264,6 +1265,266 @@ Estrutura:
   } catch (error: any) {
     console.error('Erro em studio artifact:', error);
     res.status(400).json({ error: error.message || 'Falha ao processar material do estúdio' });
+  }
+});
+
+// ==========================================
+// ADMIN USER MANAGEMENT & SALES APIS
+// Admin restriction: leandroljs89@gmail.com
+// ==========================================
+const ADMIN_AUTHORIZED_EMAIL = 'leandroljs89@gmail.com';
+
+function checkAdminAuth(req: express.Request, res: express.Response): boolean {
+  const callerEmail = (req.body?.adminEmail || req.query?.adminEmail || req.headers['x-admin-email'] || '').toString().trim().toLowerCase();
+  if (callerEmail !== ADMIN_AUTHORIZED_EMAIL.toLowerCase()) {
+    res.status(403).json({ error: 'Acesso negado. Apenas o administrador leandroljs89@gmail.com possui permissão para gerenciar usuários e vendas.' });
+    return false;
+  }
+  return true;
+}
+
+// 1. Admin Create User
+router.post('/admin/create-user', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+
+  try {
+    const { 
+      supabaseUrl, 
+      serviceRoleKey, 
+      anonKey,
+      email, 
+      password, 
+      fullName, 
+      plan = 'monthly', 
+      status = 'active', 
+      expiresAt, 
+      pricePaid = 0, 
+      phoneWhatsapp = '', 
+      notes = '' 
+    } = req.body;
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Email do cliente é obrigatório.' });
+    }
+
+    const finalUrl = (supabaseUrl || process.env.SUPABASE_URL || '').trim();
+    const finalServiceKey = (serviceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+    const finalAnonKey = (anonKey || process.env.SUPABASE_ANON_KEY || '').trim();
+
+    let createdUserId = '';
+
+    // If Service Role Key is provided, use Supabase Admin Auth API to create auth user directly without confirmation email
+    if (finalUrl && finalServiceKey) {
+      const adminClient = createClient(finalUrl, finalServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false }
+      });
+
+      const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
+        email: email.trim().toLowerCase(),
+        password: password || 'Acesso@2026',
+        email_confirm: true,
+        user_metadata: {
+          full_name: fullName || email.split('@')[0],
+          role: 'user',
+          plan,
+          phone_whatsapp: phoneWhatsapp
+        }
+      });
+
+      if (authError) {
+        // If user already exists in auth, find existing user
+        if (authError.message.toLowerCase().includes('already') || authError.message.toLowerCase().includes('exists')) {
+          const { data: usersList } = await adminClient.auth.admin.listUsers();
+          const existing = usersList?.users?.find(u => u.email?.toLowerCase() === email.trim().toLowerCase());
+          if (existing) {
+            createdUserId = existing.id;
+          } else {
+            return res.status(400).json({ error: `Usuário já existe no Supabase Auth: ${authError.message}` });
+          }
+        } else {
+          return res.status(400).json({ error: `Erro no Supabase Auth Admin: ${authError.message}` });
+        }
+      } else if (authData?.user) {
+        createdUserId = authData.user.id;
+      }
+
+      // Upsert profile in Supabase
+      if (createdUserId) {
+        await adminClient.from('profiles').upsert({
+          id: createdUserId,
+          full_name: fullName || email.split('@')[0],
+          role: 'user',
+          plan,
+          status,
+          expires_at: expiresAt || null,
+          price_paid: Number(pricePaid) || 0,
+          phone_whatsapp: phoneWhatsapp || null,
+          notes: notes || null,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+      }
+    } else if (finalUrl && finalAnonKey) {
+      // Fallback: Sign up via standard client
+      const standardClient = createClient(finalUrl, finalAnonKey);
+      const { data: signUpData, error: signUpError } = await standardClient.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password: password || 'Acesso@2026',
+        options: {
+          data: {
+            full_name: fullName || email.split('@')[0],
+            role: 'user',
+            plan,
+            phone_whatsapp: phoneWhatsapp
+          }
+        }
+      });
+
+      if (signUpError && !signUpError.message.toLowerCase().includes('already')) {
+        return res.status(400).json({ error: `Erro ao cadastrar usuário: ${signUpError.message}` });
+      }
+
+      createdUserId = signUpData?.user?.id || 'gen_' + Date.now();
+    } else {
+      createdUserId = 'usr_' + Date.now();
+    }
+
+    return res.json({
+      success: true,
+      message: 'Usuário cadastrado com sucesso!',
+      user: {
+        id: createdUserId,
+        email: email.trim().toLowerCase(),
+        full_name: fullName || email.split('@')[0],
+        role: 'user',
+        plan,
+        status,
+        expires_at: expiresAt || null,
+        created_at: new Date().toISOString(),
+        notes,
+        price_paid: Number(pricePaid) || 0,
+        phone_whatsapp: phoneWhatsapp,
+        temporary_password: password || 'Acesso@2026'
+      }
+    });
+  } catch (error: any) {
+    console.error('Erro em admin/create-user:', error);
+    res.status(500).json({ error: error.message || 'Falha ao criar usuário.' });
+  }
+});
+
+// 2. Admin List Users
+router.post('/admin/list-users', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+
+  try {
+    const { supabaseUrl, serviceRoleKey, anonKey } = req.body;
+    const finalUrl = (supabaseUrl || process.env.SUPABASE_URL || '').trim();
+    const finalKey = (serviceRoleKey || anonKey || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+
+    if (!finalUrl || !finalKey) {
+      return res.json({ users: [] });
+    }
+
+    const client = createClient(finalUrl, finalKey);
+    const { data: profiles, error } = await client
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.json({ users: [], error: error.message });
+    }
+
+    return res.json({
+      users: (profiles || []).map((p: any) => ({
+        id: p.id,
+        email: p.email || p.user_metadata?.email || `${p.full_name?.toLowerCase().replace(/\s+/g, '') || 'usuario'}@cliente.com`,
+        full_name: p.full_name || 'Usuário',
+        role: p.role || (p.email === ADMIN_AUTHORIZED_EMAIL ? 'admin' : 'user'),
+        plan: p.plan || 'monthly',
+        status: p.status || 'active',
+        expires_at: p.expires_at || null,
+        created_at: p.created_at || new Date().toISOString(),
+        notes: p.notes || '',
+        price_paid: Number(p.price_paid) || 0,
+        phone_whatsapp: p.phone_whatsapp || ''
+      }))
+    });
+  } catch (error: any) {
+    console.error('Erro em admin/list-users:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 3. Admin Update User (Plan, Status, Expiry, Notes)
+router.post('/admin/update-user', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+
+  try {
+    const { supabaseUrl, serviceRoleKey, anonKey, userId, updates } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
+    }
+
+    const finalUrl = (supabaseUrl || process.env.SUPABASE_URL || '').trim();
+    const finalKey = (serviceRoleKey || anonKey || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+
+    if (finalUrl && finalKey) {
+      const client = createClient(finalUrl, finalKey);
+      await client
+        .from('profiles')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId);
+    }
+
+    return res.json({ success: true, message: 'Usuário atualizado com sucesso!' });
+  } catch (error: any) {
+    console.error('Erro em admin/update-user:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Admin Delete User
+router.post('/admin/delete-user', async (req, res) => {
+  if (!checkAdminAuth(req, res)) return;
+
+  try {
+    const { supabaseUrl, serviceRoleKey, anonKey, userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
+    }
+
+    const finalUrl = (supabaseUrl || process.env.SUPABASE_URL || '').trim();
+    const finalServiceKey = (serviceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+    if (finalUrl && finalServiceKey) {
+      const adminClient = createClient(finalUrl, finalServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false }
+      });
+      try {
+        await adminClient.auth.admin.deleteUser(userId);
+      } catch (e) {
+        console.warn('deleteUser auth error:', e);
+      }
+      try {
+        await adminClient.from('profiles').delete().eq('id', userId);
+      } catch (e) {
+        console.warn('delete profile error:', e);
+      }
+      try {
+        await adminClient.from('notebooks').delete().eq('user_id', userId);
+      } catch (e) {
+        console.warn('delete notebooks error:', e);
+      }
+    }
+
+    return res.json({ success: true, message: 'Usuário excluído com sucesso.' });
+  } catch (error: any) {
+    console.error('Erro em admin/delete-user:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

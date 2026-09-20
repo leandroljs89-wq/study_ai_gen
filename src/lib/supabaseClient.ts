@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
-import { Notebook, NotebookDocument, DocumentChunk, ChatMessage, UserApiKeys, QuickNote } from '../types';
+import { Notebook, NotebookDocument, DocumentChunk, ChatMessage, UserApiKeys, QuickNote, ManagedUser, UserAccessPlan, UserAccessStatus, ADMIN_EMAIL } from '../types';
 import { ensureUUID, isValidUUID } from './uuid';
 
 let supabaseInstance: SupabaseClient | null = null;
@@ -660,3 +660,134 @@ export async function searchChunksViaSupabase(
     return [];
   }
 }
+
+/**
+ * Admin: Fetch all users/profiles for user management
+ */
+export async function fetchManagedUsersFromSupabase(): Promise<ManagedUser[]> {
+  const client = getSupabase();
+  if (!client) return [];
+
+  try {
+    const { data, error } = await client
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      console.warn('Erro ao buscar profiles no Supabase:', error);
+      return [];
+    }
+
+    return data.map((p: any) => ({
+      id: p.id,
+      email: p.email || p.user_metadata?.email || `${p.full_name?.toLowerCase().replace(/\s+/g, '') || 'user'}@cliente.com`,
+      full_name: p.full_name || 'Usuário',
+      role: p.role || (p.email === 'leandroljs89@gmail.com' ? 'admin' : 'user'),
+      plan: p.plan || 'monthly',
+      status: p.status || 'active',
+      expires_at: p.expires_at || null,
+      created_at: p.created_at || new Date().toISOString(),
+      notes: p.notes || '',
+      price_paid: Number(p.price_paid) || 0,
+      phone_whatsapp: p.phone_whatsapp || ''
+    }));
+  } catch (e) {
+    console.warn('Exceção ao listar usuários gerenciados:', e);
+    return [];
+  }
+}
+
+/**
+ * Admin: Update or save user profile in Supabase
+ */
+export async function saveManagedUserProfile(user: Partial<ManagedUser> & { id: string }): Promise<boolean> {
+  const client = getSupabase();
+  if (!client || !user.id) return false;
+
+  try {
+    const payload: any = {
+      id: user.id,
+      updated_at: new Date().toISOString()
+    };
+    if (user.full_name !== undefined) payload.full_name = user.full_name;
+    if (user.role !== undefined) payload.role = user.role;
+    if (user.plan !== undefined) payload.plan = user.plan;
+    if (user.status !== undefined) payload.status = user.status;
+    if (user.expires_at !== undefined) payload.expires_at = user.expires_at;
+    if (user.notes !== undefined) payload.notes = user.notes;
+    if (user.price_paid !== undefined) payload.price_paid = user.price_paid;
+    if (user.phone_whatsapp !== undefined) payload.phone_whatsapp = user.phone_whatsapp;
+
+    const { error } = await client
+      .from('profiles')
+      .upsert(payload, { onConflict: 'id' });
+
+    if (error) {
+      // Fallback to update
+      const { error: updateError } = await client
+        .from('profiles')
+        .update(payload)
+        .eq('id', user.id);
+
+      return !updateError;
+    }
+
+    return true;
+  } catch (e) {
+    console.warn('Erro ao salvar perfil gerenciado:', e);
+    return false;
+  }
+}
+
+/**
+ * Check if the currently authenticated user's subscription is active
+ */
+export async function verifyUserAccessStatus(userId: string, userEmail?: string): Promise<{
+  allowed: boolean;
+  reason?: 'expired' | 'suspended' | 'not_found';
+  plan?: string;
+  expiresAt?: string | null;
+}> {
+  // Admin leandroljs89@gmail.com always has unrestricted lifetime access
+  if (userEmail === 'leandroljs89@gmail.com') {
+    return { allowed: true, plan: 'lifetime' };
+  }
+
+  const client = getSupabase();
+  if (!client || !userId) {
+    return { allowed: true }; // allow local usage if not connected
+  }
+
+  try {
+    const { data, error } = await client
+      .from('profiles')
+      .select('role, plan, status, expires_at')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return { allowed: true, plan: 'free' };
+    }
+
+    if (data.role === 'admin') {
+      return { allowed: true, plan: 'lifetime' };
+    }
+
+    if (data.status === 'suspended') {
+      return { allowed: false, reason: 'suspended', plan: data.plan, expiresAt: data.expires_at };
+    }
+
+    if (data.expires_at) {
+      const expirationDate = new Date(data.expires_at);
+      if (!isNaN(expirationDate.getTime()) && expirationDate.getTime() < Date.now()) {
+        return { allowed: false, reason: 'expired', plan: data.plan, expiresAt: data.expires_at };
+      }
+    }
+
+    return { allowed: true, plan: data.plan, expiresAt: data.expires_at };
+  } catch {
+    return { allowed: true };
+  }
+}
+

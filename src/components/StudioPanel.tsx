@@ -19,6 +19,7 @@ import {
 import Markdown from 'react-markdown';
 import { NotebookDocument, AIProvider } from '../types';
 import { apiFetch } from '../lib/apiHelper';
+import { User } from '@supabase/supabase-js';
 
 interface StudioPanelProps {
   isOpen: boolean;
@@ -29,6 +30,8 @@ interface StudioPanelProps {
   apiKey?: string;
   geminiApiKey?: string;
   onSaveAsNote: (title: string, content: string) => void;
+  currentUser?: User | null;
+  onOpenAuthModal?: () => void;
 }
 
 type StudioArtifactType = 'audio_overview' | 'study_guide' | 'briefing_doc' | 'faq';
@@ -41,7 +44,9 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
   activeProvider,
   apiKey,
   geminiApiKey,
-  onSaveAsNote
+  onSaveAsNote,
+  currentUser,
+  onOpenAuthModal
 }) => {
   const [activeArtifact, setActiveArtifact] = useState<StudioArtifactType>('audio_overview');
   const [artifactContents, setArtifactContents] = useState<Record<string, string>>({});
@@ -55,6 +60,10 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
   const currentContent = artifactContents[activeArtifact] || '';
 
   const generateArtifact = async (type: StudioArtifactType) => {
+    if (!currentUser) {
+      onOpenAuthModal?.();
+      return;
+    }
     setIsGenerating(true);
     setError(null);
     if ('speechSynthesis' in window) {

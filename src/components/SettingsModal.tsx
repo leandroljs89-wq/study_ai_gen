@@ -21,7 +21,7 @@ import {
   Trash2,
   ShieldCheck
 } from 'lucide-react';
-import { UserApiKeys, SupabaseConfig, Notebook, AIProvider } from '../types';
+import { UserApiKeys, SupabaseConfig, Notebook, AIProvider, ADMIN_EMAIL } from '../types';
 import { testSupabaseConnection, saveProfileApiKeys } from '../lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/apiHelper';
@@ -50,6 +50,7 @@ interface SettingsModalProps {
   initialProvider?: AIProvider;
   currentUser?: User | null;
   onOpenAuthModal?: () => void;
+  onOpenAdminModal?: () => void;
 }
 
 const SUPABASE_SCHEMA_SQL = `-- 1. HABILITAR EXTENSÕES NECESSÁRIAS
@@ -242,9 +243,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveRagParams,
   initialProvider,
   currentUser,
-  onOpenAuthModal
+  onOpenAuthModal,
+  onOpenAdminModal
 }) => {
   const [activeTab, setActiveTab] = useState<'apikeys' | 'supabase' | 'rag'>('apikeys');
+
+  const isAdmin = currentUser?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   // Form states
   const [keysForm, setKeysForm] = useState<UserApiKeys>({ ...apiKeys });
@@ -626,6 +630,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Content Area */}
         <div className="p-5 flex-1 overflow-y-auto space-y-4">
+          {/* Admin Management Quick Banner */}
+          {isAdmin && (
+            <div className="p-3.5 bg-linear-to-r from-amber-950 via-stone-900 to-amber-900 text-white rounded-xl border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-400/40 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-amber-300">Você é o Administrador ({ADMIN_EMAIL})</span>
+                    <span className="px-2 py-0.2 rounded-full bg-amber-400/20 text-amber-300 text-[9px] font-bold uppercase tracking-wider">
+                      ADM EXCLUSIVO
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-stone-300 mt-0.5">
+                    Acesse o painel para cadastrar novos clientes, gerenciar prazos, planos e vender acessos.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenAdminModal?.();
+                }}
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer shadow-sm border border-amber-400/40"
+              >
+                Abrir Painel Admin & Vendas
+              </button>
+            </div>
+          )}
+
           {/* TAB 1: API KEYS & DIRECT CONNECT */}
           {activeTab === 'apikeys' && (
             <div className="space-y-4">

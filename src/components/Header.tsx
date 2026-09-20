@@ -17,9 +17,13 @@ import {
   PlugZap,
   CheckCircle2,
   AlertTriangle,
-  Cloud
+  Cloud,
+  ShieldCheck,
+  Users,
+  LogIn,
+  LogOut
 } from 'lucide-react';
-import { AIProvider, ModelOption, Notebook } from '../types';
+import { AIProvider, ModelOption, Notebook, ADMIN_EMAIL } from '../types';
 import { User } from '@supabase/supabase-js';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 
@@ -53,6 +57,7 @@ interface HeaderProps {
   currentUser?: User | null;
   onOpenAuthModal?: () => void;
   isSupabaseConnected?: boolean;
+  onOpenAdminModal?: () => void;
 }
 
 const PROVIDER_NAMES: Record<AIProvider, { label: string; badge: string; color: string }> = {
@@ -88,12 +93,15 @@ export const Header: React.FC<HeaderProps> = ({
   hasOpenRouterKey,
   currentUser,
   onOpenAuthModal,
-  isSupabaseConnected
+  isSupabaseConnected,
+  onOpenAdminModal
 }) => {
   const [isNotebookDropdownOpen, setIsNotebookDropdownOpen] = useState(false);
   const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [notebookToDelete, setNotebookToDelete] = useState<Notebook | null>(null);
+
+  const isAdmin = currentUser?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   const startRename = (nb: Notebook, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -311,37 +319,31 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Studio Toggle & Settings */}
       <div className="flex items-center gap-2">
-        {/* Supabase Cloud & RLS Auth Pill */}
-        <button
-          id="btn-supabase-status"
-          onClick={currentUser ? onOpenAuthModal : (isSupabaseConnected ? onOpenAuthModal : onOpenSettings)}
-          title={
-            currentUser
-              ? `Supabase Conectado & Autenticado como ${currentUser.email}. Seus cadernos e mensagens estão persistindo na nuvem.`
-              : isSupabaseConnected
-              ? 'Supabase Conectado! Clique para Fazer Login e Ativar a Persistência de Dados (RLS).'
-              : 'Configurar Supabase para Persistência em Nuvem'
-          }
-          className={`flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border shadow-2xs ${
-            currentUser
-              ? 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100'
-              : isSupabaseConnected
-              ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-              : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
-          }`}
-        >
-          <Cloud className={`w-3.5 h-3.5 ${currentUser ? 'text-emerald-600' : isSupabaseConnected ? 'text-amber-600 animate-pulse' : 'text-stone-400'}`} />
-          <span className="hidden sm:inline">
-            {currentUser 
-              ? (currentUser.email?.split('@')[0] || 'Nuvem Conectada') 
-              : isSupabaseConnected 
-              ? 'Entrar no Supabase (RLS)' 
-              : 'Conectar Nuvem'}
-          </span>
-          {currentUser && (
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-xs hidden sm:inline-block" />
-          )}
-        </button>
+        {/* User Account / Auth Button */}
+        {currentUser ? (
+          <button
+            id="btn-user-profile"
+            onClick={onOpenAuthModal}
+            title={`Conectado como ${currentUser.email}. Clique para ver sua conta ou sair.`}
+            className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border border-emerald-300 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 shadow-2xs"
+          >
+            <Cloud className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="max-w-[120px] truncate hidden sm:inline">
+              {currentUser.email?.split('@')[0]}
+            </span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-xs" />
+          </button>
+        ) : (
+          <button
+            id="btn-header-login"
+            onClick={onOpenAuthModal}
+            title="Faça login com sua conta para salvar cadernos privados e conversar com a IA"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-amber-600 hover:bg-amber-700 text-white shadow-sm border border-amber-700 cursor-pointer"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Entrar / Login</span>
+          </button>
+        )}
 
         {/* Quick Connect Keys Button */}
         <button
@@ -368,6 +370,19 @@ export const Header: React.FC<HeaderProps> = ({
           <Sparkles className="w-4 h-4 text-amber-600" />
           <span className="hidden sm:inline">Estúdio</span>
         </button>
+
+        {/* Admin Panel & Sales Button */}
+        {isAdmin && (
+          <button
+            id="btn-open-admin"
+            onClick={onOpenAdminModal}
+            title="Painel Exclusivo de Vendas e Gestão de Usuários (Apenas leandroljs89@gmail.com)"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-linear-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white text-xs font-bold rounded-lg transition-all shadow-sm border border-amber-500 cursor-pointer animate-in fade-in"
+          >
+            <ShieldCheck className="w-4 h-4 text-amber-200" />
+            <span className="hidden sm:inline">Admin & Vendas</span>
+          </button>
+        )}
 
         {/* Settings Modal Button */}
         <button
