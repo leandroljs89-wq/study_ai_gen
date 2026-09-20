@@ -84,7 +84,7 @@ export async function ensureUserProfile(user: User, fullName?: string): Promise<
 }
 
 /**
- * Load saved API keys from public.profiles table
+ * Load saved API keys from public.profiles table (supports unified JSONB api_keys and legacy columns)
  */
 export async function loadProfileApiKeys(userId: string): Promise<UserApiKeys | null> {
   const client = getSupabase();
@@ -92,18 +92,24 @@ export async function loadProfileApiKeys(userId: string): Promise<UserApiKeys | 
   try {
     const { data, error } = await client
       .from('profiles')
-      .select('openai_api_key, anthropic_api_key, gemini_api_key, groq_api_key, openrouter_api_key, ollama_host')
+      .select('*')
       .eq('id', userId)
       .maybeSingle();
 
     if (error || !data) return null;
+
+    // Check unified JSONB column first (api_keys)
+    const jsonKeys = (typeof data.api_keys === 'object' && data.api_keys !== null) 
+      ? data.api_keys 
+      : (typeof data.settings?.api_keys === 'object' ? data.settings.api_keys : {});
+
     return {
-      openai_api_key: data.openai_api_key || '',
-      anthropic_api_key: data.anthropic_api_key || '',
-      gemini_api_key: data.gemini_api_key || '',
-      groq_api_key: data.groq_api_key || '',
-      openrouter_api_key: data.openrouter_api_key || '',
-      ollama_host: data.ollama_host || ''
+      openrouter_api_key: jsonKeys.openrouter || jsonKeys.openrouter_api_key || data.openrouter_api_key || '',
+      groq_api_key: jsonKeys.groq || jsonKeys.groq_api_key || data.groq_api_key || '',
+      gemini_api_key: jsonKeys.gemini || jsonKeys.gemini_api_key || data.gemini_api_key || '',
+      openai_api_key: jsonKeys.openai || jsonKeys.openai_api_key || data.openai_api_key || '',
+      anthropic_api_key: jsonKeys.anthropic || jsonKeys.anthropic_api_key || data.anthropic_api_key || '',
+      ollama_host: jsonKeys.ollama || jsonKeys.ollama_host || data.ollama_host || ''
     };
   } catch (e) {
     console.warn('Erro ao carregar chaves do profile Supabase:', e);
@@ -113,12 +119,49 @@ export async function loadProfileApiKeys(userId: string): Promise<UserApiKeys | 
 
 /**
  * Save API keys directly into public.profiles table
+ * Uses flexible JSONB api_keys column to avoid polluting table attributes and preventing missing column schema errors.
  */
 export async function saveProfileApiKeys(userId: string, keys: UserApiKeys): Promise<boolean> {
   const client = getSupabase();
   if (!client || !userId) return false;
   try {
-    const payload = {
+    const apiKeysObject = {
+      openrouter: keys.openrouter_api_key?.trim() || '',
+      groq: keys.groq_api_key?.trim() || '',
+      gemini: keys.gemini_api_key?.trim() || '',
+      openai: keys.openai_api_key?.trim() || '',
+      anthropic: keys.anthropic_api_key?.trim() || '',
+      ollama: keys.ollama_host?.trim() || ''
+    };
+
+    // 1. Primary Strategy: Upsert unified JSONB column (Escalável e limpo)
+    const { error: jsonError } = await client
+      .from('profiles')
+      .upsert({
+        id: userId,
+        api_keys: apiKeysObject,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+
+    if (!jsonError) {
+      return true;
+    }
+
+    // 2. Fallback: Update only api_keys column if row already exists
+    const { error: jsonUpdateError } = await client
+      .from('profiles')
+      .update({
+        api_keys: apiKeysObject,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (!jsonUpdateError) {
+      return true;
+    }
+
+    // 3. Fallback for legacy database schemas with individual column attributes
+    const legacyPayload: any = {
       id: userId,
       openai_api_key: keys.openai_api_key?.trim() || null,
       anthropic_api_key: keys.anthropic_api_key?.trim() || null,
@@ -129,34 +172,15 @@ export async function saveProfileApiKeys(userId: string, keys: UserApiKeys): Pro
       updated_at: new Date().toISOString()
     };
 
-    // 1. Try upsert first
-    const { error: upsertError } = await client
+    const { error: legacyError } = await client
       .from('profiles')
-      .upsert(payload, { onConflict: 'id' });
+      .upsert(legacyPayload, { onConflict: 'id' });
 
-    if (!upsertError) {
+    if (!legacyError) {
       return true;
     }
 
-    // 2. Fallback to direct update if upsert failed due to unique constraint or RLS
-    const { error: updateError } = await client
-      .from('profiles')
-      .update({
-        openai_api_key: payload.openai_api_key,
-        anthropic_api_key: payload.anthropic_api_key,
-        gemini_api_key: payload.gemini_api_key,
-        groq_api_key: payload.groq_api_key,
-        openrouter_api_key: payload.openrouter_api_key,
-        ollama_host: payload.ollama_host,
-        updated_at: payload.updated_at
-      })
-      .eq('id', userId);
-
-    if (updateError) {
-      console.warn('Erro ao atualizar chaves no profile Supabase:', updateError);
-      return false;
-    }
-    return true;
+    return false;
   } catch (e) {
     console.warn('Erro ao salvar chaves no profile Supabase:', e);
     return false;

@@ -239,8 +239,23 @@ export default function App() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatInputText, setChatInputText] = useState('');
 
-  // Supabase Auth listener & auto-sync
+  // Refs to prevent unwanted re-fetching and UI jumping loops
+  const notebooksRef = React.useRef(notebooks);
+  notebooksRef.current = notebooks;
+
+  const activeNotebookIdRef = React.useRef(activeNotebookId);
+  activeNotebookIdRef.current = activeNotebookId;
+
+  const syncedUserIdRef = React.useRef<string | null>(null);
+
+  // Supabase Auth listener & auto-sync (runs cleanly ONCE per user session)
   const handleUserAuthenticated = useCallback(async (user: User) => {
+    // Avoid double syncing if already synced for this user ID
+    if (syncedUserIdRef.current === user.id) {
+      return;
+    }
+    syncedUserIdRef.current = user.id;
+
     try {
       setIsSyncingWithSupabase(true);
       await ensureUserProfile(user);
@@ -276,17 +291,24 @@ export default function App() {
       const remoteNotebooks = await fetchUserNotebooks(user.id);
       if (remoteNotebooks.length > 0) {
         setNotebooks(remoteNotebooks);
-        setActiveNotebookId(remoteNotebooks[0].id);
+
+        // Preserve current active notebook if it exists in remote notebooks
+        const currentActiveId = activeNotebookIdRef.current;
+        const targetId = remoteNotebooks.some(n => n.id === currentActiveId)
+          ? currentActiveId
+          : remoteNotebooks[0].id;
+        setActiveNotebookId(targetId);
 
         // Fetch chat messages for active notebook
-        const msgs = await fetchChatMessagesFromSupabase(remoteNotebooks[0].id);
+        const msgs = await fetchChatMessagesFromSupabase(targetId);
         if (msgs && msgs.length > 0) {
-          setChatHistories(prev => ({ ...prev, [remoteNotebooks[0].id]: msgs }));
+          setChatHistories(prev => ({ ...prev, [targetId]: msgs }));
         }
       } else {
         // User has no notebooks in Supabase yet.
         // Persist the current local notebook(s) so their initial workspace is in the database!
-        for (const nb of notebooks) {
+        const localList = notebooksRef.current;
+        for (const nb of localList) {
           await persistNotebookToSupabase(nb, user.id);
         }
       }
@@ -295,23 +317,25 @@ export default function App() {
     } finally {
       setIsSyncingWithSupabase(false);
     }
-  }, [notebooks]);
+  }, []);
 
   // Listen to Supabase Auth State
   useEffect(() => {
     const sb = getSupabase(supabaseConfig.url, supabaseConfig.anonKey);
     if (!sb) {
       setCurrentUser(null);
+      syncedUserIdRef.current = null;
       return;
     }
 
-    // Check existing session
+    // Check existing session once on mount or config change
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         setCurrentUser(session.user);
         await handleUserAuthenticated(session.user);
       } else {
         setCurrentUser(null);
+        syncedUserIdRef.current = null;
       }
     }).catch(e => console.warn('Supabase getSession error:', e));
 
@@ -319,11 +343,12 @@ export default function App() {
     const { data: { subscription } } = sb.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setCurrentUser(session.user);
-        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
           await handleUserAuthenticated(session.user);
         }
       } else {
         setCurrentUser(null);
+        syncedUserIdRef.current = null;
       }
     });
 
@@ -337,11 +362,17 @@ export default function App() {
     if (currentUser && activeNotebookId) {
       fetchChatMessagesFromSupabase(activeNotebookId).then(msgs => {
         if (msgs && msgs.length > 0) {
-          setChatHistories(prev => ({ ...prev, [activeNotebookId]: msgs }));
+          setChatHistories(prev => {
+            // Only update if messages actually differ to avoid render triggers
+            if (JSON.stringify(prev[activeNotebookId]) === JSON.stringify(msgs)) {
+              return prev;
+            }
+            return { ...prev, [activeNotebookId]: msgs };
+          });
         }
       }).catch(e => console.warn('Erro ao carregar mensagens do Supabase:', e));
     }
-  }, [activeNotebookId, currentUser]);
+  }, [activeNotebookId, currentUser?.id]);
 
   // Update available models when provider changes
   const refreshModelsForProvider = useCallback(async (provider: AIProvider, currentKeys: UserApiKeys) => {

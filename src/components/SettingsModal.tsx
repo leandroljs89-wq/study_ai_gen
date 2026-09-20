@@ -63,16 +63,14 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name TEXT,
     avatar_url TEXT,
-    -- API Keys salvas por usuário para os provedores de IA
-    openai_api_key TEXT,
-    anthropic_api_key TEXT,
-    gemini_api_key TEXT,
-    groq_api_key TEXT,
-    openrouter_api_key TEXT,
-    ollama_host TEXT,
+    -- Chaves de API salvas em formato JSONB unificado (Flexível, sem poluição de atributos)
+    api_keys JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Migração não-destrutiva (garante a coluna api_keys caso a tabela já exista)
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS api_keys JSONB DEFAULT '{}'::jsonb;
 
 -- TABELA: notebooks (Cadernos)
 CREATE TABLE IF NOT EXISTS public.notebooks (

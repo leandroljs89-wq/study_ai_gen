@@ -190,7 +190,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <div
                 className={`rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-2xl ${
                   msg.role === 'user'
-                    ? 'bg-stone-900 text-white rounded-tr-xs'
+                    ? 'bg-blue-600 text-white rounded-tr-xs shadow-xs'
                     : 'bg-stone-50/90 border border-stone-200/90 text-stone-800 rounded-tl-xs shadow-2xs w-full'
                 }`}
               >
@@ -225,7 +225,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 )}
 
                 {/* Message Content */}
-                <div className="markdown-body prose prose-sm max-w-none text-stone-800">
+                <div
+                  className={`markdown-body prose prose-sm max-w-none ${
+                    msg.role === 'user'
+                      ? 'text-white prose-invert prose-p:text-white prose-p:leading-relaxed prose-headings:text-white prose-strong:text-white prose-code:text-white prose-li:text-white'
+                      : 'text-stone-800'
+                  }`}
+                >
                   <Markdown>{msg.content}</Markdown>
                 </div>
 
@@ -272,7 +278,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               </div>
 
               {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-lg bg-stone-200 text-stone-700 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
                   <User className="w-4 h-4" />
                 </div>
               )}

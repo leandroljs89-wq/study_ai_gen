@@ -73,24 +73,149 @@ export const StudioPanel: React.FC<StudioPanelProps> = ({
         throw new Error('Nenhuma fonte com conteúdo de texto disponível no caderno.');
       }
 
-      const keyToUse = apiKey || geminiApiKey;
+      const keyToUse = (apiKey || geminiApiKey || '').trim();
 
-      const data = await apiFetch('/api/generate-studio-artifact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          documentsText: combinedText,
-          notebookTitle,
-          provider: activeProvider,
-          apiKey: keyToUse
-        })
-      });
+      // 1. Try Backend API endpoint
+      try {
+        const data = await apiFetch('/api/generate-studio-artifact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            documentsText: combinedText,
+            notebookTitle,
+            provider: activeProvider,
+            apiKey: keyToUse
+          })
+        });
 
-      setArtifactContents(prev => ({
-        ...prev,
-        [type]: data.content
-      }));
+        if (data.content) {
+          setArtifactContents(prev => ({
+            ...prev,
+            [type]: data.content
+          }));
+          setIsGenerating(false);
+          return;
+        }
+      } catch (serverErr) {
+        console.warn('Backend studio artifact failed, attempting direct client fallback:', serverErr);
+      }
+
+      // 2. Direct Browser Client Fallback
+      let artifactPrompt = '';
+      if (type === 'audio_overview') {
+        artifactPrompt = `Você é o roteirista do recurso "Audio Overview" do NotebookLM. Com base nas fontes do caderno "${notebookTitle}", crie um diálogo estilo podcast entre Alex e Sam. Estrutura: Título cativante, saudação, discussão dos pontos centrais e lição prática final com marcações [Alex] e [Sam]. Em Português.`;
+      } else if (type === 'study_guide') {
+        artifactPrompt = `Gere um "Guia de Estudos Completo" baseado no caderno "${notebookTitle}" com: 1. Resumo Geral, 2. Conceitos-Chave, 3. Perguntas de Fixação com Gabarito, 4. Flashcards de Revisão.`;
+      } else if (type === 'briefing_doc') {
+        artifactPrompt = `Gere um "Briefing Executivo" baseado no caderno "${notebookTitle}" com: 1. Sumário Executivo, 2. Análise Detalhada, 3. Implicações e Decisões, 4. Próximos Passos.`;
+      } else if (type === 'faq') {
+        artifactPrompt = `Gere uma seção de "Perguntas Frequentes (FAQ)" com as 7 perguntas e respostas mais importantes fundamentadas no caderno "${notebookTitle}".`;
+      } else {
+        artifactPrompt = `Faça um resumo completo e estruturado do caderno "${notebookTitle}".`;
+      }
+
+      const fullPrompt = `${artifactPrompt}\n\n--- DOCUMENTOS ---\n${combinedText.slice(0, 25000)}`;
+
+      // Client Direct: OpenRouter
+      if (activeProvider === 'openrouter' && keyToUse) {
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${keyToUse}`,
+            'HTTP-Referer': 'https://notebooklm.app',
+            'X-Title': 'NotebookLM Pro'
+          },
+          body: JSON.stringify({
+            model: 'anthropic/claude-3.7-sonnet',
+            messages: [{ role: 'user', content: fullPrompt }],
+            temperature: 0.3
+          })
+        });
+        if (resp.ok) {
+          const resJson: any = await resp.json();
+          const text = resJson.choices?.[0]?.message?.content;
+          if (text) {
+            setArtifactContents(prev => ({ ...prev, [type]: text }));
+            setIsGenerating(false);
+            return;
+          }
+        }
+      }
+
+      // Client Direct: Groq
+      if (activeProvider === 'groq' && keyToUse) {
+        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${keyToUse}`
+          },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [{ role: 'user', content: fullPrompt }],
+            temperature: 0.3
+          })
+        });
+        if (resp.ok) {
+          const resJson: any = await resp.json();
+          const text = resJson.choices?.[0]?.message?.content;
+          if (text) {
+            setArtifactContents(prev => ({ ...prev, [type]: text }));
+            setIsGenerating(false);
+            return;
+          }
+        }
+      }
+
+      // Client Direct: Gemini
+      if (activeProvider === 'gemini' && keyToUse) {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keyToUse}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: fullPrompt }] }],
+            generationConfig: { temperature: 0.2 }
+          })
+        });
+        if (resp.ok) {
+          const resJson: any = await resp.json();
+          const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            setArtifactContents(prev => ({ ...prev, [type]: text }));
+            setIsGenerating(false);
+            return;
+          }
+        }
+      }
+
+      // Client Direct: OpenAI
+      if (activeProvider === 'openai' && keyToUse) {
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${keyToUse}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: fullPrompt }],
+            temperature: 0.3
+          })
+        });
+        if (resp.ok) {
+          const resJson: any = await resp.json();
+          const text = resJson.choices?.[0]?.message?.content;
+          if (text) {
+            setArtifactContents(prev => ({ ...prev, [type]: text }));
+            setIsGenerating(false);
+            return;
+          }
+        }
+      }
+
+      throw new Error('Não foi possível gerar o material. Verifique a chave de API do provedor nas configurações.');
     } catch (err: any) {
       setError(err.message || 'Erro ao gerar material.');
     } finally {

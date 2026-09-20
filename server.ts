@@ -1045,71 +1045,110 @@ Estrutura:
     if (provider === 'openrouter') {
       const openRouterKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
       if (!openRouterKey) {
-        return res.status(401).json({ error: 'Chave da API OpenRouter não informada. Conecte sua chave no painel de configurações.' });
+        return res.status(400).json({ error: 'Chave da API OpenRouter não informada. Conecte sua chave no painel de configurações.' });
       }
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${openRouterKey}`,
-          'HTTP-Referer': 'https://notebooklm.app',
-          'X-Title': 'NotebookLM Pro'
-        },
-        body: JSON.stringify({
-          model: 'anthropic/claude-3.7-sonnet',
-          messages: [{ role: 'user', content: fullPrompt }],
-          temperature: 0.3
-        })
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Erro da OpenRouter: HTTP ${response.status}`);
+
+      const candidateModels = [
+        'anthropic/claude-3.7-sonnet',
+        'deepseek/deepseek-r1',
+        'deepseek/deepseek-chat',
+        'google/gemini-2.0-flash-001',
+        'meta-llama/llama-3.3-70b-instruct'
+      ];
+
+      let lastError = '';
+      for (const m of candidateModels) {
+        try {
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${openRouterKey}`,
+              'HTTP-Referer': 'https://notebooklm.app',
+              'X-Title': 'NotebookLM Pro'
+            },
+            body: JSON.stringify({
+              model: m,
+              messages: [{ role: 'user', content: fullPrompt }],
+              temperature: 0.3
+            })
+          });
+
+          if (response.ok) {
+            const data: any = await response.json();
+            const text = data.choices?.[0]?.message?.content;
+            if (text) {
+              return res.json({
+                success: true,
+                type,
+                title: notebookTitle,
+                content: text
+              });
+            }
+          } else {
+            const errData = await response.json().catch(() => ({}));
+            lastError = errData.error?.message || `HTTP ${response.status}`;
+          }
+        } catch (e: any) {
+          lastError = e.message;
+        }
       }
-      const data: any = await response.json();
-      return res.json({
-        success: true,
-        type,
-        title: notebookTitle,
-        content: data.choices?.[0]?.message?.content || 'Não foi possível gerar o artefato.'
-      });
+
+      return res.status(400).json({ error: lastError || 'Erro ao comunicar com a API do OpenRouter.' });
     }
 
     // 2. Groq
     if (provider === 'groq') {
       const groqKey = (apiKey || process.env.GROQ_API_KEY || '').trim();
       if (!groqKey) {
-        return res.status(401).json({ error: 'Chave da API Groq não informada. Conecte sua chave no painel de configurações.' });
+        return res.status(400).json({ error: 'Chave da API Groq não informada. Conecte sua chave no painel de configurações.' });
       }
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${groqKey}`
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: fullPrompt }],
-          temperature: 0.3
-        })
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Erro da Groq: HTTP ${response.status}`);
+
+      const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'deepseek-r1-distill-llama-70b'];
+      let lastError = '';
+      for (const m of groqModels) {
+        try {
+          const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${groqKey}`
+            },
+            body: JSON.stringify({
+              model: m,
+              messages: [{ role: 'user', content: fullPrompt }],
+              temperature: 0.3
+            })
+          });
+
+          if (response.ok) {
+            const data: any = await response.json();
+            const text = data.choices?.[0]?.message?.content;
+            if (text) {
+              return res.json({
+                success: true,
+                type,
+                title: notebookTitle,
+                content: text
+              });
+            }
+          } else {
+            const errData = await response.json().catch(() => ({}));
+            lastError = errData.error?.message || `HTTP ${response.status}`;
+          }
+        } catch (e: any) {
+          lastError = e.message;
+        }
       }
-      const data: any = await response.json();
-      return res.json({
-        success: true,
-        type,
-        title: notebookTitle,
-        content: data.choices?.[0]?.message?.content || 'Não foi possível gerar o artefato.'
-      });
+
+      return res.status(400).json({ error: lastError || 'Erro ao comunicar com a API Groq.' });
     }
 
     // 3. OpenAI
     if (provider === 'openai') {
       const openAiKey = (apiKey || process.env.OPENAI_API_KEY || '').trim();
       if (!openAiKey) {
-        return res.status(401).json({ error: 'Chave da API OpenAI não informada.' });
+        return res.status(400).json({ error: 'Chave da API OpenAI não informada.' });
       }
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -1125,7 +1164,7 @@ Estrutura:
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Erro da OpenAI: HTTP ${response.status}`);
+        return res.status(400).json({ error: err.error?.message || `Erro da OpenAI: HTTP ${response.status}` });
       }
       const data: any = await response.json();
       return res.json({
@@ -1140,7 +1179,7 @@ Estrutura:
     if (provider === 'anthropic') {
       const claudeKey = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
       if (!claudeKey) {
-        return res.status(401).json({ error: 'Chave da API Anthropic não informada.' });
+        return res.status(400).json({ error: 'Chave da API Anthropic não informada.' });
       }
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -1157,7 +1196,7 @@ Estrutura:
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Erro da Anthropic: HTTP ${response.status}`);
+        return res.status(400).json({ error: err.error?.message || `Erro da Anthropic: HTTP ${response.status}` });
       }
       const data: any = await response.json();
       return res.json({
@@ -1171,49 +1210,60 @@ Estrutura:
     // 5. Google Gemini or Server fallback
     const geminiKey = (apiKey || process.env.GEMINI_API_KEY || '').trim();
     if (geminiKey) {
+      const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      for (const m of geminiModels) {
+        try {
+          const directResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${geminiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: fullPrompt }] }],
+              generationConfig: { temperature: 0.2 }
+            })
+          });
+          if (directResp.ok) {
+            const data: any = await directResp.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              return res.json({
+                success: true,
+                type,
+                title: notebookTitle,
+                content: text
+              });
+            }
+          }
+        } catch (e) {
+          console.warn(`Gemini studio direct model ${m} failed`, e);
+        }
+      }
+
+      // SDK fallback
       try {
-        const directResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: fullPrompt }] }],
-            generationConfig: { temperature: 0.2 }
-          })
-        });
-        if (directResp.ok) {
-          const data: any = await directResp.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
+        const gemini = getGeminiClient(geminiKey);
+        if (gemini) {
+          const response = await gemini.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: fullPrompt
+          });
+          if (response.text) {
             return res.json({
               success: true,
               type,
               title: notebookTitle,
-              content: text
+              content: response.text
             });
           }
         }
-      } catch (e) {
-        console.warn('Gemini studio direct failed, falling to SDK', e);
-      }
-      const gemini = getGeminiClient(geminiKey);
-      if (gemini) {
-        const response = await gemini.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: fullPrompt
-        });
-        return res.json({
-          success: true,
-          type,
-          title: notebookTitle,
-          content: response.text || 'Não foi possível gerar o artefato.'
-        });
+      } catch (sdkErr: any) {
+        console.warn('Gemini studio SDK fallback failed', sdkErr);
       }
     }
 
-    res.status(400).json({ error: 'Configuração de IA necessária para gerar artefatos de estúdio. Conecte sua chave nas configurações.' });
+    return res.status(400).json({ error: 'Chave de IA não configurada para gerar os materiais do Estúdio. Adicione sua chave no painel de configurações.' });
   } catch (error: any) {
     console.error('Erro em studio artifact:', error);
-    res.status(500).json({ error: error.message || 'Falha ao gerar artefato do estúdio' });
+    res.status(400).json({ error: error.message || 'Falha ao processar material do estúdio' });
   }
 });
 
