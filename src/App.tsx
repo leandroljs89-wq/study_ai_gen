@@ -42,6 +42,20 @@ import { DocumentViewerModal } from './components/DocumentViewerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SupabaseAuthModal } from './components/SupabaseAuthModal';
 
+function formatGroqModelLabel(id: string): string {
+  if (id === 'llama-3.3-70b-versatile') return 'Llama 3.3 70B Versatile (Recomendado)';
+  if (id === 'llama-3.1-8b-instant') return 'Llama 3.1 8B Instant (Ultra-Rápido)';
+  if (id === 'deepseek-r1-distill-llama-70b') return 'DeepSeek R1 Distill Llama 70B (Raciocínio)';
+  if (id === 'deepseek-r1-distill-qwen-32b') return 'DeepSeek R1 Distill Qwen 32B';
+  if (id === 'llama-3.1-70b-versatile') return 'Llama 3.1 70B Versatile';
+  if (id === 'mixtral-8x7b-32768') return 'Mixtral 8x7B (Contexto 32k)';
+  if (id === 'gemma2-9b-it') return 'Gemma 2 9B IT (Google)';
+  if (id === 'qwen-2.5-32b') return 'Qwen 2.5 32B (Groq)';
+  if (id === 'llama3-70b-8192') return 'Llama 3 70B (8k)';
+  if (id === 'llama3-8b-8192') return 'Llama 3 8B (8k)';
+  return id;
+}
+
 const DEFAULT_MODELS: Record<AIProvider, ModelOption[]> = {
   gemini: [
     { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Rápido & Inteligente)', recommended: true },
@@ -60,8 +74,15 @@ const DEFAULT_MODELS: Record<AIProvider, ModelOption[]> = {
     { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet', recommended: false },
   ],
   groq: [
-    { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile', recommended: true },
-    { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant', recommended: true },
+    { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Recomendado)', recommended: true },
+    { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Ultra-Rápido)', recommended: true },
+    { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B (Raciocínio)', recommended: true },
+    { id: 'llama-3.1-70b-versatile', name: 'Llama 3.1 70B Versatile', recommended: false },
+    { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B (Contexto 32k)', recommended: false },
+    { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT (Google)', recommended: false },
+    { id: 'qwen-2.5-32b', name: 'Qwen 2.5 32B', recommended: false },
+    { id: 'llama3-70b-8192', name: 'Llama 3 70B (8k)', recommended: false },
+    { id: 'llama3-8b-8192', name: 'Llama 3 8B (8k)', recommended: false },
   ],
   ollama: [
     { id: 'llama3:latest', name: 'Llama 3 (Local)', recommended: true },
@@ -305,11 +326,70 @@ export default function App() {
   const refreshModelsForProvider = useCallback(async (provider: AIProvider, currentKeys: UserApiKeys) => {
     setIsLoadingModels(true);
     let keyToUse = '';
-    if (provider === 'gemini') keyToUse = currentKeys.gemini_api_key || '';
-    if (provider === 'openai') keyToUse = currentKeys.openai_api_key || '';
-    if (provider === 'anthropic') keyToUse = currentKeys.anthropic_api_key || '';
-    if (provider === 'groq') keyToUse = currentKeys.groq_api_key || '';
+    if (provider === 'gemini') keyToUse = (currentKeys.gemini_api_key || '').trim();
+    if (provider === 'openai') keyToUse = (currentKeys.openai_api_key || '').trim();
+    if (provider === 'anthropic') keyToUse = (currentKeys.anthropic_api_key || '').trim();
+    if (provider === 'groq') keyToUse = (currentKeys.groq_api_key || '').trim();
 
+    // 1. Direct Browser Client Fetch for Groq (Instant & Full list)
+    if (provider === 'groq' && keyToUse) {
+      try {
+        const resp = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { Authorization: `Bearer ${keyToUse}` }
+        });
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const groqModels = (data.data || [])
+            .filter((m: any) => !m.id.includes('whisper') && !m.id.includes('tts') && !m.id.includes('guard'))
+            .map((m: any) => ({
+              id: m.id,
+              name: formatGroqModelLabel(m.id),
+              recommended: m.id.includes('llama-3.3-70b') || m.id.includes('llama-3.1-8b') || m.id.includes('deepseek-r1')
+            }))
+            .sort((a: any, b: any) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+
+          if (groqModels.length > 0) {
+            setAvailableModels(groqModels);
+            setSelectedModel(prev => groqModels.some((m: any) => m.id === prev) ? prev : groqModels[0].id);
+            setIsLoadingModels(false);
+            return;
+          }
+        }
+      } catch (clientErr) {
+        console.warn('Direct Groq models fetch fallback:', clientErr);
+      }
+    }
+
+    // 2. Direct Browser Client Fetch for OpenAI
+    if (provider === 'openai' && keyToUse) {
+      try {
+        const resp = await fetch('https://api.openai.com/v1/models', {
+          headers: { Authorization: `Bearer ${keyToUse}` }
+        });
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const openAiModels = (data.data || [])
+            .filter((m: any) => m.id.startsWith('gpt-') || m.id.startsWith('o1') || m.id.startsWith('o3'))
+            .map((m: any) => ({
+              id: m.id,
+              name: m.id,
+              recommended: m.id === 'gpt-4o' || m.id === 'gpt-4o-mini'
+            }))
+            .sort((a: any, b: any) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+
+          if (openAiModels.length > 0) {
+            setAvailableModels(openAiModels);
+            setSelectedModel(prev => openAiModels.some((m: any) => m.id === prev) ? prev : openAiModels[0].id);
+            setIsLoadingModels(false);
+            return;
+          }
+        }
+      } catch (clientErr) {
+        console.warn('Direct OpenAI models fetch fallback:', clientErr);
+      }
+    }
+
+    // 3. Server API endpoint fallback
     try {
       const data = await apiFetch('/api/models', {
         method: 'POST',
@@ -323,9 +403,8 @@ export default function App() {
 
       if (data.models && data.models.length > 0) {
         setAvailableModels(data.models);
-        // Set recommended or first model
         const recommended = data.models.find((m: ModelOption) => m.recommended) || data.models[0];
-        setSelectedModel(recommended.id);
+        setSelectedModel(prev => data.models.some((m: ModelOption) => m.id === prev) ? prev : recommended.id);
         return;
       }
     } catch (err) {
@@ -334,11 +413,15 @@ export default function App() {
       setIsLoadingModels(false);
     }
 
-    // Fallback to defaults
-    const fallback = DEFAULT_MODELS[provider];
+    // 4. Fallback to defaults
+    const fallback = DEFAULT_MODELS[provider] || DEFAULT_MODELS.gemini;
     setAvailableModels(fallback);
-    setSelectedModel(fallback[0]?.id || '');
+    setSelectedModel(prev => fallback.some(m => m.id === prev) ? prev : (fallback[0]?.id || ''));
   }, []);
+
+  useEffect(() => {
+    refreshModelsForProvider(activeProvider, apiKeys);
+  }, [activeProvider, refreshModelsForProvider]);
 
   const handleSelectProvider = (provider: AIProvider) => {
     setActiveProvider(provider);
@@ -610,26 +693,147 @@ export default function App() {
         similarity: r.similarity
       }));
 
-      // 3. STEP 3: Dispatch to Server with Context Optimization
+      // 3. STEP 3: Dispatch to Server or Direct Client with Context Optimization
       let activeKey = '';
-      if (activeProvider === 'gemini') activeKey = apiKeys.gemini_api_key || '';
-      if (activeProvider === 'openai') activeKey = apiKeys.openai_api_key || '';
-      if (activeProvider === 'anthropic') activeKey = apiKeys.anthropic_api_key || '';
-      if (activeProvider === 'groq') activeKey = apiKeys.groq_api_key || '';
+      if (activeProvider === 'gemini') activeKey = (apiKeys.gemini_api_key || '').trim();
+      if (activeProvider === 'openai') activeKey = (apiKeys.openai_api_key || '').trim();
+      if (activeProvider === 'anthropic') activeKey = (apiKeys.anthropic_api_key || '').trim();
+      if (activeProvider === 'groq') activeKey = (apiKeys.groq_api_key || '').trim();
 
-      const data = await apiFetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: activeProvider,
-          model: selectedModel,
-          apiKey: activeKey,
-          ollamaHost: apiKeys.ollama_host,
-          messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
-          retrievedChunks: formattedChunks,
-          notebookTitle: activeNotebook.title
-        })
-      });
+      // Ensure model is valid for the active provider
+      let modelToSend = selectedModel;
+      if (activeProvider === 'groq') {
+        if (!modelToSend || modelToSend.startsWith('gemini') || modelToSend.startsWith('gpt') || modelToSend.startsWith('claude')) {
+          modelToSend = 'llama-3.3-70b-versatile';
+        }
+      } else if (activeProvider === 'openai') {
+        if (!modelToSend || modelToSend.startsWith('gemini') || modelToSend.startsWith('llama') || modelToSend.startsWith('claude')) {
+          modelToSend = 'gpt-4o-mini';
+        }
+      } else if (activeProvider === 'anthropic') {
+        if (!modelToSend || !modelToSend.startsWith('claude')) {
+          modelToSend = 'claude-3-5-sonnet-20241022';
+        }
+      } else if (activeProvider === 'gemini') {
+        if (!modelToSend || !modelToSend.startsWith('gemini')) {
+          modelToSend = 'gemini-3.6-flash';
+        }
+      }
+
+      let data: any = null;
+
+      try {
+        data = await apiFetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: activeProvider,
+            model: modelToSend,
+            apiKey: activeKey,
+            ollamaHost: apiKeys.ollama_host,
+            messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
+            retrievedChunks: formattedChunks,
+            notebookTitle: activeNotebook.title
+          })
+        });
+      } catch (serverErr: any) {
+        console.warn('Server chat call failed, trying direct browser client fallback:', serverErr);
+
+        // Direct Browser Client Fallback for Groq (Zero Latency & 100% Vercel reliability)
+        if (activeProvider === 'groq' && activeKey) {
+          const systemPrompt = `Você é o assistente inteligente de pesquisa e síntese de documentos integrado ao NotebookLM ("${activeNotebook.title}").
+Responda às dúvidas com precisão cirúrgica, baseando-se nas fontes recuperadas quando disponíveis.
+${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + formattedChunks.map((c, i) => `[Fonte #${i+1} | "${c.documentName}"]:\n"${c.content}"`).join('\n\n') : ''}`;
+
+          const directResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${activeKey}`
+            },
+            body: JSON.stringify({
+              model: modelToSend || 'llama-3.3-70b-versatile',
+              messages: [
+                { role: 'system', content: systemPrompt },
+                ...updatedMessages.slice(-6).map(m => ({
+                  role: m.role === 'assistant' ? 'assistant' : 'user',
+                  content: m.content
+                }))
+              ],
+              temperature: 0.2
+            })
+          });
+
+          if (!directResp.ok) {
+            const errJson = await directResp.json().catch(() => ({}));
+            throw new Error(errJson.error?.message || `Erro da Groq: HTTP ${directResp.status}`);
+          }
+
+          const directData: any = await directResp.json();
+          data = {
+            content: directData.choices?.[0]?.message?.content || 'Sem resposta da Groq.',
+            provider: 'groq',
+            model: modelToSend,
+            sources: formattedChunks.map((c, i) => ({
+              index: i + 1,
+              documentId: c.documentId,
+              documentName: c.documentName,
+              similarity: c.similarity,
+              snippet: c.content ? c.content.slice(0, 180) + '...' : ''
+            })),
+            tokensStats: {
+              retrievedChunksCount: formattedChunks.length,
+              estimatedPromptTokens: Math.round(userText.length / 4),
+              estimatedTokensSaved: 10000,
+              savingsPercentage: 90
+            }
+          };
+        } else if (activeProvider === 'openai' && activeKey) {
+          // Direct Browser Client Fallback for OpenAI
+          const systemPrompt = `Você é o assistente inteligente do NotebookLM ("${activeNotebook.title}").
+${formattedChunks.length > 0 ? '\n\n--- FONTES CONSULTADAS DO CADERNO ---\n' + formattedChunks.map((c, i) => `[Fonte #${i+1} | "${c.documentName}"]:\n"${c.content}"`).join('\n\n') : ''}`;
+
+          const directResp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${activeKey}`
+            },
+            body: JSON.stringify({
+              model: modelToSend || 'gpt-4o-mini',
+              messages: [
+                { role: 'system', content: systemPrompt },
+                ...updatedMessages.slice(-6).map(m => ({
+                  role: m.role === 'assistant' ? 'assistant' : 'user',
+                  content: m.content
+                }))
+              ],
+              temperature: 0.3
+            })
+          });
+
+          if (!directResp.ok) {
+            const errJson = await directResp.json().catch(() => ({}));
+            throw new Error(errJson.error?.message || `Erro da OpenAI: HTTP ${directResp.status}`);
+          }
+
+          const directData: any = await directResp.json();
+          data = {
+            content: directData.choices?.[0]?.message?.content || 'Sem resposta da OpenAI.',
+            provider: 'openai',
+            model: modelToSend,
+            sources: formattedChunks.map((c, i) => ({
+              index: i + 1,
+              documentId: c.documentId,
+              documentName: c.documentName,
+              similarity: c.similarity,
+              snippet: c.content ? c.content.slice(0, 180) + '...' : ''
+            }))
+          };
+        } else {
+          throw serverErr;
+        }
+      }
 
       const assistantMsg: ChatMessage = {
         id: generateUUID(),

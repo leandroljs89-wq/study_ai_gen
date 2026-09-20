@@ -100,7 +100,7 @@ router.post('/models', async (req, res) => {
     }
 
     if (provider === 'groq') {
-      const key = apiKey || process.env.GROQ_API_KEY;
+      const key = (apiKey || process.env.GROQ_API_KEY || '').trim();
       if (key) {
         try {
           const resp = await fetch('https://api.groq.com/openai/v1/models', {
@@ -108,11 +108,14 @@ router.post('/models', async (req, res) => {
           });
           if (resp.ok) {
             const data: any = await resp.json();
-            const groqModels = data.data.map((m: any) => ({
-              id: m.id,
-              name: m.id,
-              recommended: m.id.includes('llama-3.3-70b') || m.id.includes('llama-3.1-8b')
-            }));
+            const groqModels = (data.data || [])
+              .filter((m: any) => !m.id.includes('whisper') && !m.id.includes('tts') && !m.id.includes('guard'))
+              .map((m: any) => ({
+                id: m.id,
+                name: formatGroqModelLabel(m.id),
+                recommended: m.id.includes('llama-3.3-70b') || m.id.includes('llama-3.1-8b') || m.id.includes('deepseek-r1')
+              }))
+              .sort((a: any, b: any) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
             if (groqModels.length > 0) return res.json({ models: groqModels });
           }
         } catch (e) {
@@ -121,10 +124,13 @@ router.post('/models', async (req, res) => {
       }
       return res.json({
         models: [
-          { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Groq Ultra-Fast)', recommended: true },
-          { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Baixa Latência)', recommended: true },
+          { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Recomendado)', recommended: true },
+          { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Ultra-Rápido)', recommended: true },
+          { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B (Raciocínio)', recommended: true },
+          { id: 'llama-3.1-70b-versatile', name: 'Llama 3.1 70B Versatile', recommended: false },
           { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B (Contexto 32k)', recommended: false },
-          { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT', recommended: false }
+          { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT (Google)', recommended: false },
+          { id: 'qwen-2.5-32b', name: 'Qwen 2.5 32B', recommended: false }
         ]
       });
     }
@@ -466,6 +472,20 @@ router.post('/embeddings', async (req, res) => {
   }
 });
 
+function formatGroqModelLabel(id: string): string {
+  if (id === 'llama-3.3-70b-versatile') return 'Llama 3.3 70B Versatile (Recomendado)';
+  if (id === 'llama-3.1-8b-instant') return 'Llama 3.1 8B Instant (Ultra-Rápido)';
+  if (id === 'deepseek-r1-distill-llama-70b') return 'DeepSeek R1 Distill Llama 70B (Raciocínio)';
+  if (id === 'deepseek-r1-distill-qwen-32b') return 'DeepSeek R1 Distill Qwen 32B';
+  if (id === 'llama-3.1-70b-versatile') return 'Llama 3.1 70B Versatile';
+  if (id === 'mixtral-8x7b-32768') return 'Mixtral 8x7B (Contexto 32k)';
+  if (id === 'gemma2-9b-it') return 'Gemma 2 9B IT (Google)';
+  if (id === 'qwen-2.5-32b') return 'Qwen 2.5 32B (Groq)';
+  if (id === 'llama3-70b-8192') return 'Llama 3 70B (8k)';
+  if (id === 'llama3-8b-8192') return 'Llama 3 8B (8k)';
+  return id;
+}
+
 // Deterministic semantic embedding generator (1536 dimensions) for local similarity
 function generateDeterministicEmbedding(text: string, dim = 1536): number[] {
   const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
@@ -669,14 +689,22 @@ ${ragContextSection}`;
 
     // 4. Groq
     else if (provider === 'groq') {
-      const key = apiKey || process.env.GROQ_API_KEY;
+      const key = (apiKey || process.env.GROQ_API_KEY || '').trim();
       if (!key) {
-        return res.status(401).json({ error: 'Chave da API Groq não configurada.' });
+        return res.status(401).json({ error: 'Chave da API Groq não configurada. Conecte sua chave no painel de configurações.' });
+      }
+
+      let groqModel = model;
+      if (!groqModel || groqModel.startsWith('gemini') || groqModel.startsWith('gpt') || groqModel.startsWith('claude')) {
+        groqModel = 'llama-3.3-70b-versatile';
       }
 
       const groqMessages = [
         { role: 'system', content: systemPrompt },
-        ...messages.slice(-4)
+        ...messages.slice(-6).map((m: any) => ({
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content: m.content
+        }))
       ];
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -686,7 +714,7 @@ ${ragContextSection}`;
           Authorization: `Bearer ${key}`
         },
         body: JSON.stringify({
-          model: model || 'llama-3.3-70b-versatile',
+          model: groqModel,
           messages: groqMessages,
           temperature: 0.2
         })
@@ -699,6 +727,7 @@ ${ragContextSection}`;
 
       const data: any = await response.json();
       reply = data.choices?.[0]?.message?.content || 'Sem resposta da Groq.';
+      usedModel = groqModel;
     }
 
     // 5. Ollama (Local)
